@@ -2,9 +2,10 @@ package api
 
 // CensysResult represents a result item from Censys API
 type CensysResult struct {
-	IP       string    `json:"ip"`
-	DNS      DNS       `json:"dns"`
-	Services []Service `json:"services"`
+	IP              string    `json:"ip"`
+	DNS             DNS       `json:"dns"`
+	Services        []Service `json:"services"`
+	MatchedServices []Service `json:"matched_services"`
 }
 
 // DNS contains DNS information from Censys

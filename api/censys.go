@@ -124,8 +124,16 @@ func (c *CensysClient) ExtractHostsFromResults(jsonPath string) ([]Host, error) 
 			c.Logger.Debug("Using DNS name for host: %s", baseAddress)
 		}
 
+		// Use matched_services if available, otherwise fall back to services
+		servicesToProcess := result.Services
+		if len(result.MatchedServices) > 0 {
+			c.Logger.Debug("Using %d matched services for host instead of all services",
+				len(result.MatchedServices))
+			servicesToProcess = result.MatchedServices
+		}
+
 		// Extract each HTTP service
-		for j, service := range result.Services {
+		for j, service := range servicesToProcess {
 			// Only process HTTP services
 			if service.ServiceName != "HTTP" && service.ServiceName != "HTTPS" {
 				continue
@@ -156,6 +164,6 @@ func (c *CensysClient) ExtractHostsFromResults(jsonPath string) ([]Host, error) 
 		}
 	}
 
-	c.Logger.Info("Extracted %d hosts from Censys results", len(hosts))
+	c.Logger.Debug("Extracted %d hosts from Censys results", len(hosts))
 	return hosts, nil
 }
