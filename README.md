@@ -40,7 +40,7 @@ Censei (pronounced like "Sensei") is a command-line tool written in Go that uses
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/censei.git
+   git clone https://github.com/8linkz/censei.git
    cd censei
    ```
 
