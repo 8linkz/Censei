@@ -75,27 +75,64 @@ func (c *CensysClient) ExtractHostsFromResults(jsonPath string) ([]Host, error) 
 		return nil, fmt.Errorf("failed to read results file: %w", err)
 	}
 
+	c.Logger.Debug("Read %d bytes from JSON file", len(data))
+
+	// Log the first 500 characters for debugging
+	if len(data) > 0 {
+		previewLength := 500
+		if len(data) < previewLength {
+			previewLength = len(data)
+		}
+		c.Logger.Debug("JSON preview: %s", string(data[:previewLength]))
+	} else {
+		c.Logger.Debug("JSON file is empty")
+		return nil, fmt.Errorf("JSON file is empty")
+	}
+
 	// Parse the JSON
 	var results []CensysResult
 	err = json.Unmarshal(data, &results)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse results JSON: %w", err)
+		c.Logger.Debug("Failed to parse JSON as array, trying alternative format: %v", err)
+
+		// It might be an object with a results array
+		var wrapper struct {
+			Results []CensysResult `json:"results"`
+		}
+
+		err = json.Unmarshal(data, &wrapper)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse results JSON in any format: %w", err)
+		}
+
+		results = wrapper.Results
 	}
+
+	c.Logger.Debug("Parsed %d results from JSON", len(results))
 
 	// Extract hosts
 	hosts := make([]Host, 0)
 
-	for _, result := range results {
-		// Use name if available, otherwise use IP
-		baseAddress := result.Name
-		if baseAddress == "" {
-			baseAddress = result.IP
+	for i, result := range results {
+		c.Logger.Debug("Processing result #%d: IP=%s, Services=%d",
+			i, result.IP, len(result.Services))
+
+		// Determine base address (hostname)
+		baseAddress := result.IP
+		if len(result.DNS.ReverseDNS.Names) > 0 {
+			baseAddress = result.DNS.ReverseDNS.Names[0]
+			c.Logger.Debug("Using DNS name for host: %s", baseAddress)
 		}
 
-		// Extract each service
-		for _, service := range result.MatchedServices {
+		// Extract each HTTP service
+		for j, service := range result.Services {
+			// Only process HTTP services
+			if service.ServiceName != "HTTP" && service.ServiceName != "HTTPS" {
+				continue
+			}
+
 			protocol := "http"
-			if service.Port == 443 {
+			if service.ServiceName == "HTTPS" || service.Port == 443 {
 				protocol = "https"
 			}
 
@@ -107,13 +144,14 @@ func (c *CensysClient) ExtractHostsFromResults(jsonPath string) ([]Host, error) 
 				URL:         fmt.Sprintf("%s://%s:%d", protocol, baseAddress, service.Port),
 			}
 
-			// Special case for port 443 (https)
+			// Special case for standard ports
 			if service.Port == 443 {
 				host.URL = fmt.Sprintf("https://%s", baseAddress)
 			} else if service.Port == 80 {
 				host.URL = fmt.Sprintf("http://%s", baseAddress)
 			}
 
+			c.Logger.Debug("Created host #%d.%d: %s", i, j, host.URL)
 			hosts = append(hosts, host)
 		}
 	}

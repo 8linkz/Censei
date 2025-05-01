@@ -15,7 +15,8 @@
         "filters": [
             ".docx",
             ".zip",
-            ".xlsx"
+            ".xlsx",
+            ".lnk"
         ]
     },
     {
@@ -24,7 +25,18 @@
         "filters": [
             ".doc",
             ".pdf",
-            ".exe"
+            ".exe",
+            ".lnk"
+        ]
+    },
+    {
+        "name": "WsgiDAV",
+        "query": "services.http.response.html_tags:\"<title>WsgiDAV - Index of /</title>\"",
+        "filters": [
+            ".doc",
+            ".pdf",
+            ".exe",
+            ".lnk"
         ]
     }
 ]
