@@ -1,0 +1,30 @@
+[
+    {
+        "name": "Russia Suspicious OpenDir",
+        "query": "labels:suspicious-open-dir and location.country_code:RU",
+        "filters": [
+            ".pdf",
+            ".lnk",
+            ".exe",
+            ".elf"
+        ]
+    },
+    {
+        "name": "US OpenDir",
+        "query": "labels:open-dir and location.country_code:US",
+        "filters": [
+            ".docx",
+            ".zip",
+            ".xlsx"
+        ]
+    },
+    {
+        "name": "Germany Suspicious OpenDir",
+        "query": "labels:suspicious-open-dir and location.country_code:DE",
+        "filters": [
+            ".doc",
+            ".pdf",
+            ".exe"
+        ]
+    }
+]

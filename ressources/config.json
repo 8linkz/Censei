@@ -1,0 +1,9 @@
+{
+    "api_key": "your-api-key",
+    "api_secret": "your-api-secret",
+    "output_dir": "./output",
+    "http_timeout_seconds": 5,
+    "max_concurrent_requests": 10,
+    "log_level": "INFO",
+    "log_file": "./censei.log"
+}
