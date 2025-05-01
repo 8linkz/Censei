@@ -100,7 +100,7 @@ func (w *Worker) ProcessHosts(hosts []api.Host) {
 // processHost handles a single host's crawling
 func (w *Worker) processHost(host api.Host) {
 	// Log the host we're processing
-	w.logger.Info("Processing host: %s", host.URL)
+	w.logger.Debug("Processing host: %s", host.URL)
 
 	// Check if host is online
 	online, err := w.client.CheckHostOnline(host)
@@ -110,7 +110,7 @@ func (w *Worker) processHost(host api.Host) {
 	}
 
 	if !online {
-		w.logger.Info("Host is offline: %s", host.URL)
+		w.logger.Debug("Host is offline: %s", host.URL)
 		return
 	}
 
