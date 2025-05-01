@@ -5,17 +5,21 @@
         "filters": [
             ".pdf",
             ".lnk",
-            ".exe",
-            ".elf"
+            ".ps1",
+            ".bat",
+            ".scr",
+            ".exe"
         ]
     },
     {
         "name": "US OpenDir",
         "query": "labels:open-dir and location.country_code:US",
         "filters": [
-            ".docx",
+            ".exe",
             ".zip",
-            ".xlsx",
+            ".ps1",
+            ".bat",
+            ".scr",
             ".lnk"
         ]
     },
@@ -23,9 +27,11 @@
         "name": "Germany Suspicious OpenDir",
         "query": "labels:suspicious-open-dir and location.country_code:DE",
         "filters": [
-            ".doc",
             ".pdf",
             ".exe",
+            ".ps1",
+            ".bat",
+            ".scr",
             ".lnk"
         ]
     },
@@ -33,10 +39,12 @@
         "name": "WsgiDAV",
         "query": "services.http.response.html_tags:\"<title>WsgiDAV - Index of /</title>\"",
         "filters": [
-            ".doc",
             ".pdf",
             ".exe",
-            ".lnk"
+            ".lnk",
+            ".ps1",
+            ".scr",
+            ".bat"
         ]
     }
 ]

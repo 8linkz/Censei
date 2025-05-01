@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -35,6 +36,7 @@ func (c *CensysClient) ExecuteQuery(query, outputDir string) (string, error) {
 	c.Logger.Debug("Output will be saved to: %s", outputPath)
 
 	// Build command
+	c.Logger.Debug("Creating censys command with API credentials")
 	cmd := exec.Command(
 		"censys", "search",
 		"--api-id", c.APIID,
@@ -48,18 +50,42 @@ func (c *CensysClient) ExecuteQuery(query, outputDir string) (string, error) {
 		query,
 	)
 
+	// Create a buffer to capture output
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
 	// Run command
-	output, err := cmd.CombinedOutput()
+	c.Logger.Debug("Executing censys command...")
+	err := cmd.Run()
+	stdoutStr := stdout.String()
+	stderrStr := stderr.String()
+
+	c.Logger.Debug("Command completed with stdout: %s", stdoutStr)
+	if stderrStr != "" {
+		c.Logger.Debug("Command stderr: %s", stderrStr)
+	}
+
 	if err != nil {
-		return "", fmt.Errorf("censys CLI error: %s: %w", string(output), err)
+		c.Logger.Error("Censys command failed: %v", err)
+		return "", fmt.Errorf("censys CLI error: %s: %w", stderrStr, err)
 	}
 
 	c.Logger.Info("Censys query completed successfully")
-	c.Logger.Debug("Censys CLI output: %s", string(output))
 
 	// Verify the output file exists
+	c.Logger.Debug("Checking if output file exists: %s", outputPath)
 	if _, err := os.Stat(outputPath); os.IsNotExist(err) {
+		c.Logger.Error("Output file does not exist: %s", outputPath)
 		return "", fmt.Errorf("censys did not create output file")
+	}
+
+	// Check file content
+	fileInfo, err := os.Stat(outputPath)
+	if err != nil {
+		c.Logger.Error("Error getting file info: %v", err)
+	} else {
+		c.Logger.Debug("Output file size: %d bytes", fileInfo.Size())
 	}
 
 	return outputPath, nil
@@ -70,8 +96,10 @@ func (c *CensysClient) ExtractHostsFromResults(jsonPath string) ([]Host, error) 
 	c.Logger.Info("Extracting hosts from Censys results")
 
 	// Read the JSON file
+	c.Logger.Debug("Reading JSON file: %s", jsonPath)
 	data, err := os.ReadFile(jsonPath)
 	if err != nil {
+		c.Logger.Error("Failed to read results file: %v", err)
 		return nil, fmt.Errorf("failed to read results file: %w", err)
 	}
 
@@ -91,6 +119,7 @@ func (c *CensysClient) ExtractHostsFromResults(jsonPath string) ([]Host, error) 
 
 	// Parse the JSON
 	var results []CensysResult
+	c.Logger.Debug("Attempting to parse JSON as array")
 	err = json.Unmarshal(data, &results)
 	if err != nil {
 		c.Logger.Debug("Failed to parse JSON as array, trying alternative format: %v", err)
@@ -100,15 +129,18 @@ func (c *CensysClient) ExtractHostsFromResults(jsonPath string) ([]Host, error) 
 			Results []CensysResult `json:"results"`
 		}
 
+		c.Logger.Debug("Attempting to parse JSON as wrapper object")
 		err = json.Unmarshal(data, &wrapper)
 		if err != nil {
+			c.Logger.Error("Failed to parse results JSON in any format: %v", err)
 			return nil, fmt.Errorf("failed to parse results JSON in any format: %w", err)
 		}
 
 		results = wrapper.Results
+		c.Logger.Debug("Successfully parsed JSON as wrapper object with %d results", len(results))
+	} else {
+		c.Logger.Debug("Successfully parsed JSON as array with %d results", len(results))
 	}
-
-	c.Logger.Debug("Parsed %d results from JSON", len(results))
 
 	// Extract hosts
 	hosts := make([]Host, 0)
