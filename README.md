@@ -7,7 +7,7 @@
 
 ### What is Censei?
 
-Censei (pronounced like "Census" + "Eye") is a command-line tool written in Go that uses the Censys API to search for suspicious open directories. It automates the process of identifying hosts, checking their accessibility, crawling directory indexes, and filtering files based on specific criteria.
+Censei (pronounced like "Sensei") is a command-line tool written in Go that uses the Censys API to search for suspicious open directories. It automates the process of identifying hosts, checking their accessibility, crawling directory indexes, and filtering files based on specific criteria.
 
 ### Key Features
 
