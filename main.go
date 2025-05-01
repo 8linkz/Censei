@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"sync"
 	"time"
 
 	"censei/api"
@@ -107,20 +106,6 @@ func main() {
 func runQuery(cfg *config.Config, query string, filters []string, logger *logging.Logger) {
 	startTime := time.Now()
 
-	// Initialize statistics
-	stats := struct {
-		totalHosts    int
-		onlineHosts   int
-		totalFiles    int
-		filteredFiles int
-		mu            sync.Mutex
-	}{
-		totalHosts:    0,
-		onlineHosts:   0,
-		totalFiles:    0,
-		filteredFiles: 0,
-	}
-
 	// Initialize Censys client
 	censysClient := api.NewCensysClient(cfg.APIKey, cfg.APISecret, logger)
 
@@ -138,7 +123,6 @@ func runQuery(cfg *config.Config, query string, filters []string, logger *loggin
 		os.Exit(1)
 	}
 
-	stats.totalHosts = len(hosts)
 	logger.Info("Extracted %d hosts from Censys results", len(hosts))
 
 	// Initialize output writer
@@ -153,50 +137,32 @@ func runQuery(cfg *config.Config, query string, filters []string, logger *loggin
 	fileFilter := filter.NewFilter(filters, logger)
 	logger.Info("Using filters: %v", fileFilter.GetFilterExtensions())
 
-	// Initialize crawler components
+	// Initialize client
 	client := crawler.NewClient(cfg.HTTPTimeoutSeconds, logger)
-	parser := crawler.NewParser(logger)
 
-	// Initialize worker
+	// Initialize the optimized worker
 	worker := crawler.NewWorker(
 		client,
-		parser,
 		fileFilter,
 		writer,
 		logger,
 		cfg.MaxConcurrentRequests,
 	)
 
-	// Setup callback functions to update statistics
-	worker.SetCallbacks(
-		func() { // onHostOnline
-			stats.mu.Lock()
-			stats.onlineHosts++
-			stats.mu.Unlock()
-		},
-		func() { // onFileFound
-			stats.mu.Lock()
-			stats.totalFiles++
-			stats.mu.Unlock()
-		},
-		func() { // onFilteredFileFound
-			stats.mu.Lock()
-			stats.filteredFiles++
-			stats.mu.Unlock()
-		},
-	)
-
 	// Process hosts
 	worker.ProcessHosts(hosts)
+
+	// Get statistics
+	totalHosts, onlineHosts, totalFiles, filteredFiles := worker.GetStats()
 
 	// Generate and write summary
 	endTime := time.Now()
 	summary := output.FormatSummary(
 		query,
-		stats.totalHosts,
-		stats.onlineHosts,
-		stats.totalFiles,
-		stats.filteredFiles,
+		totalHosts,
+		onlineHosts,
+		totalFiles,
+		filteredFiles,
 		fileFilter.GetFilterExtensions(),
 		startTime,
 		endTime,

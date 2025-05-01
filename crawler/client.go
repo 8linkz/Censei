@@ -20,11 +20,13 @@ type Client struct {
 
 // NewClient creates a new crawler client
 func NewClient(timeoutSeconds int, logger *logging.Logger) *Client {
-	// Create a custom transport
+	// Create a custom transport with optimized settings
 	transport := &http.Transport{
+		MaxIdleConns:          100,
+		IdleConnTimeout:       30 * time.Second,
 		ResponseHeaderTimeout: time.Duration(timeoutSeconds) * time.Second,
-		// This option prevents the "Unsolicited response" messages
-		DisableKeepAlives: true,
+		DisableKeepAlives:     true, // Prevent "unsolicited response" messages
+		DisableCompression:    true, // Speed up response processing
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: true, // Skip SSL certificate verification
 		},
@@ -45,75 +47,17 @@ func NewClient(timeoutSeconds int, logger *logging.Logger) *Client {
 	}
 }
 
-// CheckHostOnline verifies if a host is online by sending a HEAD request
-// Falls back to GET if HEAD is not allowed
-func (c *Client) CheckHostOnline(host api.Host) (bool, error) {
-	c.logger.Debug("Checking if host is online: %s", host.URL)
-
-	// Try HEAD first
-	online, err := c.checkWithMethod(host, "HEAD")
-	if err != nil {
-		c.logger.Debug("HEAD request failed, trying GET: %s (%s)", host.URL, err)
-		// Fall back to GET if there was an error
-		return c.checkWithMethod(host, "GET")
-	}
-
-	return online, nil
-}
-
-// checkWithMethod performs a check using the specified HTTP method
-func (c *Client) checkWithMethod(host api.Host, method string) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.httpClient.Timeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, method, host.URL, nil)
-	if err != nil {
-		return false, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// Set headers to avoid blocking
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; CenseiBot/1.0)")
-
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		c.logger.Debug("Host offline or unreachable: %s (%s)", host.URL, err)
-		return false, nil // Not an error, just offline
-	}
-	defer resp.Body.Close()
-
-	// For GET requests, we need to read the body to avoid connection leaks
-	if method == "GET" {
-		// Discard response body to avoid connection leaks
-		_, _ = io.Copy(io.Discard, resp.Body)
-	}
-
-	// Accept 2xx status codes as online
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		c.logger.Debug("Host online: %s (Status: %d)", host.URL, resp.StatusCode)
-		return true, nil
-	}
-
-	// Method not allowed - we'll handle this in the caller by trying GET
-	if resp.StatusCode == http.StatusMethodNotAllowed {
-		return false, fmt.Errorf("method %s not allowed", method)
-	}
-
-	c.logger.Debug("Host responded with non-OK status: %s (Status: %d)", host.URL, resp.StatusCode)
-	return false, nil
-}
-
-// FetchDirectoryIndex retrieves the directory index page
-func (c *Client) FetchDirectoryIndex(host api.Host) (string, error) {
-	c.logger.Debug("Fetching directory index for: %s", host.URL)
+// CheckHostAndFetch combines checking if host is online and fetching its content
+// Returns if the host is online, the HTML content (if any), and any error
+func (c *Client) CheckHostAndFetch(host api.Host) (bool, string, error) {
+	c.logger.Debug("Checking host and fetching content: %s", host.URL)
 
 	ctx, cancel := context.WithTimeout(context.Background(), c.httpClient.Timeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "GET", host.URL, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
+		return false, "", fmt.Errorf("failed to create request: %w", err)
 	}
 
 	// Set headers to avoid blocking
@@ -122,20 +66,25 @@ func (c *Client) FetchDirectoryIndex(host api.Host) (string, error) {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch index: %w", err)
+		c.logger.Debug("Host offline or unreachable: %s (%s)", host.URL, err)
+		return false, "", nil // Not an error, just offline
 	}
 	defer resp.Body.Close()
 
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("server returned non-OK status: %d", resp.StatusCode)
+		c.logger.Debug("Host responded with non-OK status: %s (Status: %d)", host.URL, resp.StatusCode)
+		return false, "", nil
 	}
 
 	// Read the response body
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read response body: %w", err)
+		return true, "", fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	return string(bodyBytes), nil
+	c.logger.Debug("Host online: %s (Status: %d, Content length: %d bytes)",
+		host.URL, resp.StatusCode, len(bodyBytes))
+
+	return true, string(bodyBytes), nil
 }
