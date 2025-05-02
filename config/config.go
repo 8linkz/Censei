@@ -15,13 +15,16 @@ type Config struct {
 	MaxConcurrentRequests int    `json:"max_concurrent_requests"`
 	LogLevel              string `json:"log_level"`
 	LogFile               string `json:"log_file"`
+	CheckDir              string `json:"check_dir"`
 }
 
 // Query represents a predefined Censys query with its filters
 type Query struct {
-	Name    string   `json:"name"`
-	Query   string   `json:"query"`
-	Filters []string `json:"filters"`
+	Name           string   `json:"name"`
+	Query          string   `json:"query"`
+	Filters        []string `json:"filters"`
+	Check          bool     `json:"check"`
+	TargetFileName string   `json:"target_filename"`
 }
 
 // LoadConfig loads and validates the application configuration from a file

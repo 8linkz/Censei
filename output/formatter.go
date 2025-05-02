@@ -18,9 +18,13 @@ func FormatSummary(
 	onlineHosts int,
 	totalFiles int,
 	filteredFiles int,
+	checkedFiles int,
+	binaryFilesFound int,
 	filters []string,
 	startTime time.Time,
 	endTime time.Time,
+	downloadEnabled bool,
+	targetFileName string,
 ) string {
 	duration := endTime.Sub(startTime)
 
@@ -42,6 +46,19 @@ func FormatSummary(
 	summary.WriteString(fmt.Sprintf("Total files found: %d\n", totalFiles))
 	summary.WriteString(fmt.Sprintf("Filtered files: %d\n", filteredFiles))
 	summary.WriteString(fmt.Sprintf("Applied filters: %s\n", filterStr))
+
+	// Add download information to summary
+	if downloadEnabled {
+		summary.WriteString(fmt.Sprintf("Download enabled: Yes\n"))
+		if targetFileName != "" {
+			summary.WriteString(fmt.Sprintf("Target filename: %s\n", targetFileName))
+		}
+		summary.WriteString(fmt.Sprintf("Files checked: %d\n", checkedFiles))
+		summary.WriteString(fmt.Sprintf("Binary files found: %d\n", binaryFilesFound))
+	} else {
+		summary.WriteString("Download enabled: No\n")
+	}
+
 	summary.WriteString("===========================\n")
 
 	return summary.String()

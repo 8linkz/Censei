@@ -11,6 +11,7 @@ import (
 	"censei/cli"
 	"censei/config"
 	"censei/crawler"
+	"censei/filechecker"
 	"censei/filter"
 	"censei/logging"
 	"censei/output"
@@ -43,6 +44,8 @@ func main() {
 	queryStr := flag.String("query", "", "Run specific query directly")
 	outputPath := flag.String("output", "", "Override output directory")
 	logLevel := flag.String("log-level", "", "Override log level (DEBUG, INFO, ERROR)")
+	checkFlag := flag.Bool("check", false, "Enable targeted file checking mode - skips HTML processing and link extraction, directly checks hosts for specific binary files")
+	targetFile := flag.String("target-file", "", "Specific file to check for on hosts")
 	flag.Parse()
 
 	// Initialize logging system
@@ -90,21 +93,39 @@ func main() {
 		if *filterStr != "" {
 			filters = cli.ParseFilters(*filterStr)
 		}
-		// Run the query
-		runQuery(cfg, *queryStr, filters, logger)
+		// Run the query with check options
+		runQuery(cfg, *queryStr, filters, *checkFlag, *targetFile, logger)
 	} else {
 		// Start interactive mode
-		selectedQuery, selectedFilters := cli.ShowMenu(queries, *filterStr)
+		selectedQuery, selectedFilters, checkEnabled, targetFileName := cli.ShowMenuWithCheck(
+			queries, *filterStr, *checkFlag, *targetFile)
 		if selectedQuery == "" {
 			logger.Error("No query selected, exiting")
 			os.Exit(0)
 		}
-		runQuery(cfg, selectedQuery, selectedFilters, logger)
+		runQuery(cfg, selectedQuery, selectedFilters, checkEnabled, targetFileName, logger)
 	}
 }
 
-func runQuery(cfg *config.Config, query string, filters []string, logger *logging.Logger) {
+func runQuery(cfg *config.Config, query string, filters []string, check bool, targetFileName string, logger *logging.Logger) {
 	startTime := time.Now()
+
+	// Initialize statistics
+	stats := struct {
+		totalHosts       int
+		onlineHosts      int
+		totalFiles       int
+		filteredFiles    int
+		checkedFiles     int
+		binaryFilesFound int
+	}{
+		totalHosts:       0,
+		onlineHosts:      0,
+		totalFiles:       0,
+		filteredFiles:    0,
+		checkedFiles:     0,
+		binaryFilesFound: 0,
+	}
 
 	// Initialize Censys client
 	censysClient := api.NewCensysClient(cfg.APIKey, cfg.APISecret, logger)
@@ -137,10 +158,10 @@ func runQuery(cfg *config.Config, query string, filters []string, logger *loggin
 	fileFilter := filter.NewFilter(filters, logger)
 	logger.Info("Using filters: %v", fileFilter.GetFilterExtensions())
 
-	// Initialize client
+	// Initialize crawler components
 	client := crawler.NewClient(cfg.HTTPTimeoutSeconds, logger)
 
-	// Initialize the optimized worker
+	// Initialize worker
 	worker := crawler.NewWorker(
 		client,
 		fileFilter,
@@ -149,23 +170,41 @@ func runQuery(cfg *config.Config, query string, filters []string, logger *loggin
 		cfg.MaxConcurrentRequests,
 	)
 
+	// Initialize file checker if enabled
+	if check {
+		logger.Info("File checking functionality enabled, looking for binary files")
+		if targetFileName != "" {
+			logger.Info("Target filename: %s", targetFileName)
+		}
+
+		// Create file checker
+		fileChecker := filechecker.NewFileChecker(cfg.HTTPTimeoutSeconds, logger)
+
+		// Set file checker in worker
+		worker.SetFileChecker(fileChecker, true, targetFileName)
+	}
+
 	// Process hosts
 	worker.ProcessHosts(hosts)
 
-	// Get statistics
-	totalHosts, onlineHosts, totalFiles, filteredFiles := worker.GetStats()
+	// Get updated statistics
+	stats.totalHosts, stats.onlineHosts, stats.totalFiles, stats.filteredFiles, stats.checkedFiles, stats.binaryFilesFound = worker.GetStats()
 
 	// Generate and write summary
 	endTime := time.Now()
 	summary := output.FormatSummary(
 		query,
-		totalHosts,
-		onlineHosts,
-		totalFiles,
-		filteredFiles,
+		stats.totalHosts,
+		stats.onlineHosts,
+		stats.totalFiles,
+		stats.filteredFiles,
+		stats.checkedFiles,
+		stats.binaryFilesFound,
 		fileFilter.GetFilterExtensions(),
 		startTime,
 		endTime,
+		check,
+		targetFileName,
 	)
 
 	logger.Info("\n%s", summary)

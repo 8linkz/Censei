@@ -1,69 +1,69 @@
 # Censei
 
+**Censei** ist ein leistungsstarkes Tool zur Identifizierung und Analyse von offenen Verzeichnissen im Internet mithilfe der Censys API. Der Fokus liegt dabei auf Effizienz, Anpassungsfähigkeit und detaillierter Ausgabe.
 
-**Censei** is a powerful tool for identifying and analyzing open directories on the internet using the Censys API, focusing on efficiency, customization, and detailed output.
+## Projektbeschreibung
 
-## Project Description
+### Was ist Censei?
 
-### What is Censei?
+Censei (ausgesprochen wie "Sensei") ist ein Kommandozeilen-Tool, geschrieben in Go, das die Censys API verwendet, um nach verdächtigen offenen Verzeichnissen zu suchen. Es automatisiert den Prozess der Identifizierung von Hosts, der Überprüfung ihrer Erreichbarkeit, dem Crawlen von Verzeichnisindizes und dem Filtern von Dateien nach bestimmten Kriterien.
 
-Censei (pronounced like "Sensei") is a command-line tool written in Go that uses the Censys API to search for suspicious open directories. It automates the process of identifying hosts, checking their accessibility, crawling directory indexes, and filtering files based on specific criteria.
+### Hauptfunktionen
 
-### Key Features
+- Effiziente Suche nach offenen Verzeichnissen mit Censys
+- Automatische Überprüfung der Host-Erreichbarkeit
+- Intelligentes Crawlen von Verzeichnisindizes
+- Flexibles Filtern nach Dateierweiterungen
+- Parallele Verarbeitung für höhere Geschwindigkeit
+- Detaillierte Ausgaben (raw und gefiltert)
+- Konfigurierbares Logging
+- Interaktiver und automatisierter Modus
+- Spezieller Überprüfungsmodus für binäre Dateien ohne HTML-Verarbeitung
 
-- Efficient searching for open directories with Censys
-- Automatic verification of host accessibility
-- Intelligent crawling of directory indexes
-- Flexible filtering by file extensions
-- Parallel processing for increased speed
-- Detailed outputs (raw and filtered)
-- Configurable logging
-- Interactive and automated mode
+### Anwendungsfälle
 
-### Use Cases
-
-- Security research
-- Identification of exposed files
+- Sicherheitsforschung
+- Identifizierung von exponierten Dateien
 - Open-Source Intelligence (OSINT)
-- Security audits
-- Automated scanning processes
+- Sicherheitsaudits
+- Automatisierte Scan-Prozesse
 
 ## Installation
 
-### Prerequisites
+### Voraussetzungen
 
-- Go 1.20 or higher
-- Censys CLI ([Install via pip](https://github.com/censys/censys-command-line))
-- **Censys subscription** for API access (important: this tool will not function without valid Censys subscription and API credentials!)
+- Go 1.20 oder höher
+- Censys CLI ([Installation über pip](https://github.com/censys/censys-command-line))
+- **Censys-Abonnement** für API-Zugriff (wichtig: Dieses Tool funktioniert nicht ohne gültiges Censys-Abonnement und API-Zugangsdaten!)
 
 ### Installation
 
-1. Clone the repository:
+1. Repository klonen:
    ```bash
    git clone https://github.com/8linkz/censei.git
    cd censei
    ```
 
-2. Compile the program:
+2. Programm kompilieren:
    ```bash
    go build
    ```
 
-3. Install the Censys CLI:
+3. Censys CLI installieren:
    ```bash
    pip install censys-command-line
    ```
 
-4. Verify the installation:
+4. Installation überprüfen:
    ```bash
    ./censei --help
    ```
 
-### Setting Up Configuration Files
+### Konfigurationsdateien einrichten
 
-Create two configuration files:
+Erstellen Sie zwei Konfigurationsdateien:
 
-1. **config.json** - Basic settings:
+1. **config.json** - Grundeinstellungen:
    ```json
    {
      "api_key": "your-censys-api-key",
@@ -76,7 +76,7 @@ Create two configuration files:
    }
    ```
 
-2. **queries.json** - Predefined queries:
+2. **queries.json** - Vordefinierte Abfragen:
    ```json
    [
      {
@@ -93,92 +93,108 @@ Create two configuration files:
        "name": "Germany Suspicious OpenDir",
        "query": "labels:suspicious-open-dir and location.country_code:DE",
        "filters": [".doc", ".pdf", ".exe"]
+     },
+     {
+       "name": "Cobalt Strike Scanner",
+       "query": "services.labels:`open-dir` and services.labels:`c2`",
+       "filters": [],
+       "check": true,
+       "target_filename": "02.08.2022.exe"
      }
    ]
    ```
 
-> **IMPORTANT**: You need a valid Censys subscription to obtain API key and secret. Without these credentials, Censei cannot perform queries. Visit [https://censys.io/plans](https://censys.io/plans) for information about subscriptions.
+> **WICHTIG**: Sie benötigen ein gültiges Censys-Abonnement, um API-Schlüssel und -Secret zu erhalten. Ohne diese Zugangsdaten kann Censei keine Abfragen durchführen. Besuchen Sie [https://censys.io/plans](https://censys.io/plans) für Informationen zu Abonnements.
 
-## Usage
+## Verwendung
 
-### Basic Usage
+### Grundlegende Verwendung
 
-Start Censei in interactive mode:
+Starten Sie Censei im interaktiven Modus:
 
 ```bash
 ./censei
 ```
 
-### Examples for Different Scenarios
+### Beispiele für verschiedene Szenarien
 
-**Direct query with specific filters:**
+**Direkte Abfrage mit spezifischen Filtern:**
 ```bash
 ./censei --query="labels:suspicious-open-dir and location.country_code:RU" --filter=".pdf,.exe"
 ```
 
-**Query with custom output path:**
+**Abfrage mit benutzerdefiniertem Ausgabepfad:**
 ```bash
 ./censei --output=/path/to/results
 ```
 
-**Query with different log level:**
+**Abfrage mit anderem Log-Level:**
 ```bash
 ./censei --log-level=DEBUG
 ```
 
-**Using alternative configuration files:**
+**Verwendung alternativer Konfigurationsdateien:**
 ```bash
 ./censei --config=/path/to/config.json --queries=/path/to/queries.json
 ```
 
-### Command Line Options
+**Aktivierung des Filechecker-Modus:**
+```bash
+./censei --check --target-file="suspicious.exe"
+```
 
-| Option | Description | Default |
+### Kommandozeilen-Optionen
+
+| Option | Beschreibung | Standard |
 |--------|-------------|---------|
-| `--config` | Path to configuration file | `./config.json` |
-| `--queries` | Path to queries file | `./queries.json` |
-| `--query` | Run a specific query directly | - |
-| `--filter` | Specify file extensions to filter (comma-separated) | - |
-| `--output` | Override output directory | From config |
-| `--log-level` | Set log level (DEBUG, INFO, ERROR) | From config |
+| `--config` | Pfad zur Konfigurationsdatei | `./config.json` |
+| `--queries` | Pfad zur Abfragedatei | `./queries.json` |
+| `--query` | Direkte Ausführung einer spezifischen Abfrage | - |
+| `--filter` | Angabe von zu filternden Dateierweiterungen (kommagetrennt) | - |
+| `--output` | Überschreiben des Ausgabeverzeichnisses | Aus der Konfiguration |
+| `--log-level` | Log-Level setzen (DEBUG, INFO, ERROR) | Aus der Konfiguration |
+| `--check` | Aktiviert den Filechecker-Modus - überspringt HTML-Verarbeitung und Link-Extraktion, prüft stattdessen Hosts direkt auf bestimmte Binärdateien | `false` |
+| `--target-file` | Gibt die spezifische Datei an, nach der im Filechecker-Modus gesucht werden soll | - |
 
-### Interactive Mode vs. Direct Queries
+### Interaktiver Modus vs. Direkte Abfragen
 
-When run without a `--query` parameter, Censei starts in interactive mode, presenting a menu of predefined queries from your queries.json file. This mode is user-friendly and ideal for exploration.
+Wenn das Tool ohne den `--query`-Parameter gestartet wird, startet Censei im interaktiven Modus und präsentiert ein Menü mit vordefinierten Abfragen aus Ihrer queries.json-Datei. Dieser Modus ist benutzerfreundlich und ideal für die Exploration.
 
-For automation or scripts, use the `--query` parameter to run a specific query directly without user interaction.
+Für Automatisierung oder Skripte verwenden Sie den `--query`-Parameter, um eine bestimmte Abfrage direkt ohne Benutzerinteraktion auszuführen.
 
-## Configuration
+## Konfiguration
 
-### config.json Structure
+### config.json-Struktur
 
-| Parameter | Description | Default |
+| Parameter | Beschreibung | Standard |
 |-----------|-------------|---------|
-| `api_key` | Your Censys API key | - |
-| `api_secret` | Your Censys API secret | - |
-| `output_dir` | Directory for output files | `./output` |
-| `http_timeout_seconds` | Timeout for HTTP requests | `5` |
-| `max_concurrent_requests` | Maximum parallel requests | `10` |
-| `log_level` | Logging level (DEBUG, INFO, ERROR) | `INFO` |
-| `log_file` | Path to log file | `./censei.log` |
+| `api_key` | Ihr Censys API-Schlüssel | - |
+| `api_secret` | Ihr Censys API-Secret | - |
+| `output_dir` | Verzeichnis für Ausgabedateien | `./output` |
+| `http_timeout_seconds` | Timeout für HTTP-Anfragen | `5` |
+| `max_concurrent_requests` | Maximale parallele Anfragen | `10` |
+| `log_level` | Logging-Level (DEBUG, INFO, ERROR) | `INFO` |
+| `log_file` | Pfad zur Log-Datei | `./censei.log` |
 
-### queries.json Structure
+### queries.json-Struktur
 
-The queries.json file contains an array of query objects, each with:
+Die queries.json-Datei enthält ein Array von Abfrageobjekten, jedes mit:
 
-| Field | Description | Example |
+| Feld | Beschreibung | Beispiel |
 |-------|-------------|---------|
-| `name` | Display name for the query | `"Russia Suspicious OpenDir"` |
-| `query` | Censys search query | `"labels:suspicious-open-dir and location.country_code:RU"` |
-| `filters` | Array of file extensions to filter | `[".pdf", ".exe", ".elf"]` |
+| `name` | Anzeigename für die Abfrage | `"Russia Suspicious OpenDir"` |
+| `query` | Censys-Suchabfrage | `"labels:suspicious-open-dir and location.country_code:RU"` |
+| `filters` | Array von zu filternden Dateierweiterungen | `[".pdf", ".exe", ".elf"]` |
+| `check` | Aktiviert den Filechecker-Modus für diese Abfrage | `true` |
+| `target_filename` | Spezifische Datei, nach der im Filechecker-Modus gesucht werden soll | `"02.08.2022.exe"` |
 
-## Output Files
+## Ausgabedateien
 
-Censei generates two main output files in the configured output directory:
+Censei generiert zwei Hauptausgabedateien im konfigurierten Ausgabeverzeichnis:
 
 ### raw.txt
 
-Contains all discovered URLs and files, formatted as:
+Enthält alle entdeckten URLs und Dateien, formatiert als:
 
 ```
 http://example.com
@@ -187,93 +203,113 @@ Found file: http://example.com/data/
 Found file: http://example.com/backup.zip
 ```
 
+Bei aktiviertem Filechecker-Modus werden gefundene binäre Dateien wie folgt angezeigt:
+
+```
+http://example.com
+Found binary file: http://example.com/02.08.2022.exe with Content-Type: application/x-msdownload
+```
+
 ### filtered.txt
 
-Contains only files matching the filter criteria:
+Enthält nur Dateien, die den Filterkriterien entsprechen:
 
 ```
 http://example.com/backup.zip
 http://example.com/documents/secret.pdf
 ```
 
-At the end of each file, a summary of the scan is appended with statistics and configuration details.
+Am Ende jeder Datei wird eine Zusammenfassung des Scans mit Statistiken und Konfigurationsdetails angehängt.
 
-## Advanced Features
+## Erweiterte Funktionen
 
-### Customizing Filters
+### Filechecker-Modus
 
-You can customize file filters in three ways:
+Der Filechecker-Modus ist eine spezielle Betriebsart, die für die gezielte Suche nach binären Dateien optimiert ist:
 
-1. In the queries.json file for predefined queries
-2. With the `--filter` command-line option
-3. During interactive mode when selecting "Custom query"
+- Aktiviert durch `check: true` in queries.json oder `--check` auf der Kommandozeile
+- Überspringt HTML-Verarbeitung und Link-Extraktion vollständig
+- Prüft jeden Host nur auf das Vorhandensein einer bestimmten Datei (angegeben durch `target_filename`)
+- Überprüft nur kleine Teile der Datei (Header), um den Dateityp zu bestimmen
+- Speichert keine Dateien auf der Festplatte
+- Optimiert für die schnelle Identifizierung von potenziell schädlichen Binärdateien
 
-The filter format is a comma-separated list of file extensions (e.g., `.pdf,.exe,.zip`).
+Dieser Modus ist besonders nützlich für Sicherheitsanalysten, die nach bestimmten binären Dateien suchen, ohne den gesamten Inhalt von Verzeichnissen zu durchsuchen.
 
-### Adjusting Log Levels
+### Anpassen von Filtern
 
-Available log levels:
+Sie können Filter auf drei Arten anpassen:
 
-- `DEBUG`: Detailed information for troubleshooting
-- `INFO`: General operational information
-- `ERROR`: Only error messages
+1. In der queries.json-Datei für vordefinierte Abfragen
+2. Mit der Option `--filter` auf der Kommandozeile
+3. Im interaktiven Modus bei der Auswahl von "Custom query"
 
-Set the log level in config.json or with the `--log-level` parameter.
+Das Filterformat ist eine kommagetrennte Liste von Dateierweiterungen (z.B. `.pdf,.exe,.zip`).
 
-### Optimizing Parallelization
+### Anpassen der Log-Level
 
-Adjust the `max_concurrent_requests` setting in config.json based on your system capabilities and network conditions. Higher values increase performance but may cause rate limiting or resource exhaustion.
+Verfügbare Log-Level:
 
-## Troubleshooting
+- `DEBUG`: Detaillierte Informationen zur Fehlerbehebung
+- `INFO`: Allgemeine Betriebsinformationen
+- `ERROR`: Nur Fehlermeldungen
 
-### Common Issues
+Setzen Sie das Log-Level in config.json oder mit dem Parameter `--log-level`.
 
-**Censys CLI not found:**
+### Optimierung der Parallelisierung
+
+Passen Sie die Einstellung `max_concurrent_requests` in config.json basierend auf Ihren Systemfähigkeiten und Netzwerkbedingungen an. Höhere Werte erhöhen die Leistung, können aber zu Rate-Limiting oder Ressourcenerschöpfung führen.
+
+## Fehlerbehebung
+
+### Häufige Probleme
+
+**Censys CLI nicht gefunden:**
 ```
 ERROR: The censys-cli tool was not found. Please install it with:
 pip install censys-command-line
 ```
-Solution: Install the Censys CLI as directed.
+Lösung: Installieren Sie die Censys CLI wie angegeben.
 
-**API credentials invalid:**
+**API-Zugangsdaten ungültig:**
 ```
 Failed to execute Censys query: censys CLI error: Invalid API ID or Secret
 ```
-Solution: Check your API credentials in config.json.
+Lösung: Überprüfen Sie Ihre API-Zugangsdaten in config.json.
 
-**No results found:**
+**Keine Ergebnisse gefunden:**
 ```
 Extracted 0 hosts from Censys results
 ```
-Solution: Verify your query string or try a broader search.
+Lösung: Überprüfen Sie Ihren Abfragestring oder versuchen Sie eine breitere Suche.
 
-### Debugging Tips
+### Debugging-Tipps
 
-1. Set log level to DEBUG for detailed information:
+1. Setzen Sie das Log-Level auf DEBUG für detaillierte Informationen:
    ```bash
    ./censei --log-level=DEBUG
    ```
 
-2. Check the generated JSON file to ensure Censys is returning results:
+2. Überprüfen Sie die generierte JSON-Datei, um sicherzustellen, dass Censys Ergebnisse zurückgibt:
    ```bash
    cat output/censys_results.json
    ```
 
-3. Manually test Censys CLI to verify API functionality:
+3. Testen Sie die Censys CLI manuell, um die API-Funktionalität zu überprüfen:
    ```bash
    censys search "labels:open-dir" --output test.json
    ```
 
-## Contributing
+## Beitragen
 
-Contributions are welcome! Please follow these steps:
+Beiträge sind willkommen! Bitte folgen Sie diesen Schritten:
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature-name`
-3. Commit your changes: `git commit -m 'Add some feature'`
-4. Push to the branch: `git push origin feature-name`
-5. Submit a pull request
+1. Forken Sie das Repository
+2. Erstellen Sie einen Feature-Branch: `git checkout -b feature-name`
+3. Committen Sie Ihre Änderungen: `git commit -m 'Add some feature'`
+4. Pushen Sie zum Branch: `git push origin feature-name`
+5. Reichen Sie einen Pull Request ein
 
-## License
+## Lizenz
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+Dieses Projekt ist unter der MIT-Lizenz lizenziert - siehe die LICENSE-Datei für Details.

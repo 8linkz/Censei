@@ -46,5 +46,17 @@
             ".scr",
             ".bat"
         ]
+    },
+    {
+        "name": "MooBot",
+        "query": "services.software.vendor=\"MooBot\"",
+        "filters": []
+    },
+    {
+        "name": "Cobalt Strike Scanner",
+        "query": "services.labels:`open-dir` and services.labels:`c2`",
+        "filters": [],
+        "check": true,
+        "target_filename": "02.08.2022.exe"
     }
 ]
