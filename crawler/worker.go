@@ -136,8 +136,10 @@ func (w *Worker) processHost(host api.Host) {
 		if err == nil && found {
 			w.logger.Info("Found binary file '%s' at %s with Content-Type: %s",
 				w.targetFileName, host.URL, contentType)
-			w.writer.WriteRawOutput(fmt.Sprintf("Found binary file: %s/%s with Content-Type: %s",
-				host.URL, w.targetFileName, contentType))
+			binaryOutput := fmt.Sprintf("%s/%s with Content-Type: %s",
+				host.URL, w.targetFileName, contentType)
+			w.writer.WriteRawOutput(fmt.Sprintf("Found binary file: %s", binaryOutput))
+			w.writer.WriteBinaryOutput(binaryOutput)
 
 			// Update check statistics
 			w.stats.mu.Lock()
@@ -187,8 +189,9 @@ func (w *Worker) processHost(host api.Host) {
 					found, contentType, err := w.fileChecker.CheckFileURL(fileURL)
 					if err == nil && found {
 						w.logger.Info("Found binary file at %s with Content-Type: %s", fileURL, contentType)
-						w.writer.WriteRawOutput(fmt.Sprintf("Found binary file: %s with Content-Type: %s",
-							fileURL, contentType))
+						binaryOutput := fmt.Sprintf("%s with Content-Type: %s", fileURL, contentType)
+						w.writer.WriteRawOutput(fmt.Sprintf("Found binary file: %s", binaryOutput))
+						w.writer.WriteBinaryOutput(binaryOutput)
 
 						// Update check statistics
 						w.stats.mu.Lock()

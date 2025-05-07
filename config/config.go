@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // Config holds application configuration
@@ -16,6 +17,7 @@ type Config struct {
 	LogLevel              string `json:"log_level"`
 	LogFile               string `json:"log_file"`
 	CheckDir              string `json:"check_dir"`
+	BinaryOutputFile      string `json:"binary_output_file"`
 }
 
 // Query represents a predefined Censys query with its filters
@@ -95,6 +97,11 @@ func validateConfig(cfg *Config) error {
 		if err != nil {
 			return fmt.Errorf("failed to create output directory: %w", err)
 		}
+	}
+
+	// Set default binary output file if not specified
+	if cfg.BinaryOutputFile == "" {
+		cfg.BinaryOutputFile = filepath.Join(cfg.OutputDir, "binary_found.txt")
 	}
 
 	return nil
