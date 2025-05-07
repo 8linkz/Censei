@@ -13,6 +13,7 @@ import (
 type Writer struct {
 	rawFile      *os.File
 	filteredFile *os.File
+	binaryFile   *os.File
 	mu           sync.Mutex
 	logger       *logging.Logger
 	seenUrls     map[string]bool // Track already seen URLs
@@ -40,11 +41,21 @@ func NewWriter(outputDir string, logger *logging.Logger) (*Writer, error) {
 		return nil, fmt.Errorf("failed to create filtered output file: %w", err)
 	}
 
-	logger.Info("Output files created: %s and %s", rawPath, filteredPath)
+	// Create binary output file
+	binaryPath := filepath.Join(outputDir, "binary_found.txt")
+	binaryFile, err := os.Create(binaryPath)
+	if err != nil {
+		rawFile.Close()
+		filteredFile.Close()
+		return nil, fmt.Errorf("failed to create binary output file: %w", err)
+	}
+
+	logger.Info("Output files created: %s, %s and %s", rawPath, filteredPath, binaryPath)
 
 	return &Writer{
 		rawFile:      rawFile,
 		filteredFile: filteredFile,
+		binaryFile:   binaryFile,
 		logger:       logger,
 		seenUrls:     make(map[string]bool), // Initialize the map here
 	}, nil
@@ -99,12 +110,38 @@ func (w *Writer) WriteFilteredOutput(line string) error {
 	return nil
 }
 
+// WriteBinaryOutput writes a line to the binary output file
+func (w *Writer) WriteBinaryOutput(line string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// For binary output, we use a different key to track uniqueness
+	binaryKey := "binary:" + line
+
+	// Check if we've already written this line to binary output
+	if w.seenUrls[binaryKey] {
+		w.logger.Debug("Skipping duplicate binary output: %s", line)
+		return nil
+	}
+
+	// Mark as seen
+	w.seenUrls[binaryKey] = true
+
+	_, err := fmt.Fprintln(w.binaryFile, line)
+	if err != nil {
+		w.logger.Error("Failed to write to binary output: %v", err)
+		return err
+	}
+
+	return nil
+}
+
 // Close closes all output files
 func (w *Writer) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	var rawErr, filteredErr error
+	var rawErr, filteredErr, binaryErr error
 
 	if w.rawFile != nil {
 		rawErr = w.rawFile.Close()
@@ -116,9 +153,18 @@ func (w *Writer) Close() error {
 		w.filteredFile = nil
 	}
 
+	if w.binaryFile != nil {
+		binaryErr = w.binaryFile.Close()
+		w.binaryFile = nil
+	}
+
 	if rawErr != nil {
 		return rawErr
 	}
 
-	return filteredErr
+	if filteredErr != nil {
+		return filteredErr
+	}
+
+	return binaryErr
 }

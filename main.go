@@ -205,6 +205,7 @@ func runQuery(cfg *config.Config, query string, filters []string, check bool, ta
 		endTime,
 		check,
 		targetFileName,
+		cfg.BinaryOutputFile,
 	)
 
 	logger.Info("\n%s", summary)
