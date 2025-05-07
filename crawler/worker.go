@@ -152,8 +152,8 @@ func (w *Worker) processHost(host api.Host) {
 	}
 
 	// Parse directory index and process files
-	// If in targeted mode and we only want to check for a specific file, we may skip directory scanning
-	if !(w.checkEnabled && w.targetFileName != "") {
+	// Always scan directory unless we're in targeted mode and already found the file
+	if !targetedCheckMode || w.stats.binaryFilesFound == 0 {
 		// Parse directory index and process files directly
 		links := extractLinks(host.URL, htmlContent, w.logger)
 
