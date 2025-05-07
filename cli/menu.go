@@ -12,6 +12,9 @@ import (
 
 // ShowMenuWithCheck displays an interactive menu for query selection with file checking options
 func ShowMenuWithCheck(queries []config.Query, customFilterStr string, defaultCheck bool, defaultTargetFile string) (string, []string, bool, string) {
+	// Display banner
+	PrintBanner()
+
 	// Display menu options
 	fmt.Println("\nSelect query:")
 	for i, q := range queries {
