@@ -92,6 +92,12 @@ func (fc *FileChecker) CheckSpecificFile(baseURL, fileName string) (bool, string
 	// Get content type
 	contentType := resp.Header.Get("Content-Type")
 
+	// Check content length
+	contentLength := resp.ContentLength
+	if contentLength == 0 {
+		return false, contentType, fmt.Errorf("file has zero size")
+	}
+
 	// Check for binary content types
 	isBinaryContent := strings.Contains(contentType, "application/octet-stream") ||
 		strings.Contains(contentType, "application/x-executable") ||
@@ -168,6 +174,12 @@ func (fc *FileChecker) CheckFileURL(fileURL string) (bool, string, error) {
 
 	// Get content type
 	contentType := resp.Header.Get("Content-Type")
+
+	// Check content length
+	contentLength := resp.ContentLength
+	if contentLength == 0 {
+		return false, contentType, fmt.Errorf("file has zero size")
+	}
 
 	// Check for binary content types
 	isBinaryContent := strings.Contains(contentType, "application/octet-stream") ||

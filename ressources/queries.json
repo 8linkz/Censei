@@ -58,5 +58,19 @@
         "filters": [],
         "check": true,
         "target_filename": "02.08.2022.exe"
+    },
+    {
+        "name": "SSHD Kit",
+        "query": "services.http.response.html_tags=\"<title>WEB</title>\"",
+        "filters": [],
+        "check": true,
+        "target_filename": "sshd"
+    },
+    {
+        "name": "connectwise",
+        "query": "services.http.response.html_tags=\"<title>\\r\\n\\tScreenConnect Remote Support Software\\r\\n</title>\"",
+        "filters": [],
+        "check": true,
+        "target_filename": "bin/support.client.exe"
     }
 ]
