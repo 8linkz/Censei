@@ -168,6 +168,11 @@ func (ds *DirectoryScanner) extractLinks(baseURLStr string, htmlContent string) 
 			return
 		}
 
+		// Skip other sort parameter links
+		if strings.HasPrefix(href, "/?sort=") {
+			return
+		}
+
 		// Resolve relative URLs to absolute URLs
 		fileURL, err := url.Parse(href)
 		if err != nil {
