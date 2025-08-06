@@ -9,5 +9,7 @@
     "log_file": "./censei.log",
     "max_links_per_directory": 500,
     "max_total_links": 10000,
-    "max_skips_before_block": 5
+    "max_skips_before_block": 5,
+    "enable_blocklist": true,
+    "blocklist_file": "./blocked_hosts.txt"
 }

@@ -33,6 +33,7 @@ type Worker struct {
 	blockedHosts     *sync.Map
 	skipCounters     *sync.Map
 	stats            *ScanStats
+	blocklist        *filter.Blocklist
 }
 
 // ScanStats tracks statistics during scanning
@@ -49,16 +50,22 @@ type ScanStats struct {
 // NewWorker creates a new worker for coordinating crawling
 func NewWorker(
 	client *Client,
-	filter *filter.Filter,
+	fileFilter *filter.Filter,
 	writer *output.Writer,
 	logger *logging.Logger,
 	queryConfig *config.Query,
 	config *config.Config,
 	maxWorkers int,
 ) *Worker {
+	// Initialize blocklist
+	blocklist := filter.NewBlocklist(config.BlocklistFile, config.EnableBlocklist, logger)
+	if err := blocklist.Load(); err != nil {
+		logger.Error("Failed to load blocklist: %v", err)
+	}
+
 	return &Worker{
 		client:           client,
-		filter:           filter,
+		filter:           fileFilter,
 		writer:           writer,
 		logger:           logger,
 		directoryScanner: scanners.NewDirectoryScanner(logger),
@@ -67,7 +74,10 @@ func NewWorker(
 		maxWorkers:       maxWorkers,
 		foundUrls:        &sync.Map{},
 		skippedHosts:     &sync.Map{},
+		blockedHosts:     &sync.Map{},
+		skipCounters:     &sync.Map{},
 		stats:            &ScanStats{},
+		blocklist:        blocklist,
 	}
 }
 
@@ -112,6 +122,7 @@ func (w *Worker) ProcessHosts(hosts []api.Host) {
 
 	// Wait for all workers to finish
 	wg.Wait()
+	w.blocklist.Save()
 	w.logger.Info("Finished processing all hosts")
 }
 
@@ -122,6 +133,12 @@ func (w *Worker) processHost(host api.Host) {
 
 	// Extract base host for blocking checks
 	baseHost := w.extractBaseHost(host.URL)
+
+	// Check if host is in persistent blocklist
+	if w.blocklist.IsBlocked(baseHost) {
+		w.logger.Info("Skipping host - in persistent blocklist: %s", host.URL)
+		return
+	}
 
 	// Check if entire base host is blocked
 	if _, isBlocked := w.blockedHosts.Load(baseHost); isBlocked {
@@ -160,7 +177,7 @@ func (w *Worker) processHost(host api.Host) {
 
 	// Try to check for a specific file if configured
 	if targetedCheckMode {
-		w.logger.Info("Checking for specific file %s at %s", w.targetFileName, host.URL)
+		w.logger.Debug("Checking for specific file %s at %s", w.targetFileName, host.URL)
 
 		found, contentType, err := w.fileChecker.CheckSpecificFile(host.URL, w.targetFileName)
 		if err == nil && found {
@@ -189,6 +206,20 @@ func (w *Worker) processHost(host api.Host) {
 
 // processDirectoryContent handles directory listing scanning and file processing
 func (w *Worker) processDirectoryContent(host api.Host, htmlContent string) {
+	// Extract base host and check if blocked
+	baseHost := w.extractBaseHost(host.URL)
+
+	// Early check for blocked host
+	if w.blocklist.IsBlocked(baseHost) {
+		w.logger.Debug("Skipping directory processing - host in blocklist: %s", host.URL)
+		return
+	}
+
+	if _, isBlocked := w.blockedHosts.Load(baseHost); isBlocked {
+		w.logger.Debug("Skipping directory processing - host blocked: %s", host.URL)
+		return
+	}
+
 	// Check if content is a directory listing
 	if !w.directoryScanner.IsDirectoryListing(htmlContent) {
 		w.logger.Debug("Host content is not a directory listing: %s", host.URL)
@@ -208,8 +239,8 @@ func (w *Worker) processDirectoryContent(host api.Host, htmlContent string) {
 		w.skippedHosts.Store(host.URL, true) // Mark the original host, not subdirectory
 
 		// Increment skip counter for base host
-		skipCount, _ := w.skipCounters.LoadOrStore(baseHost, int64(0))
-		newSkipCount := atomic.AddInt64(skipCount.(*int64), 1)
+		skipCountPtr, _ := w.skipCounters.LoadOrStore(baseHost, new(int64))
+		newSkipCount := atomic.AddInt64(skipCountPtr.(*int64), 1)
 
 		w.logger.Debug("Skip count for base host %s: %d", baseHost, newSkipCount)
 
@@ -217,6 +248,7 @@ func (w *Worker) processDirectoryContent(host api.Host, htmlContent string) {
 		if w.config.MaxSkipsBeforeBlock > 0 && newSkipCount >= int64(w.config.MaxSkipsBeforeBlock) {
 			w.logger.Info("Blocking entire base host after %d skips: %s", newSkipCount, baseHost)
 			w.blockedHosts.Store(baseHost, true)
+			w.blocklist.AddHost(baseHost)
 		}
 	}
 
@@ -252,7 +284,7 @@ func (w *Worker) processFoundFile(fileURL string) {
 
 	// Apply filters
 	if w.filter.ShouldFilter(fileURL) {
-		w.logger.Info("File matched filter: %s", fileURL)
+		w.logger.Debug("File matched filter: %s", fileURL)
 
 		// Update stats for filtered file
 		w.stats.mu.Lock()
@@ -298,7 +330,7 @@ func (w *Worker) GetStats() (int, int, int, int, int, int) {
 		w.stats.filteredFiles, w.stats.checkedFiles, w.stats.binaryFilesFound
 }
 
-// extractBaseHost extracts the base host (IP:port or domain:port) from a full URL
+// extractBaseHost extracts the base host (IP only) from a full URL
 func (w *Worker) extractBaseHost(fullURL string) string {
 	parsedURL, err := url.Parse(fullURL)
 	if err != nil {
@@ -306,6 +338,13 @@ func (w *Worker) extractBaseHost(fullURL string) string {
 		return fullURL // Fallback to full URL if parsing fails
 	}
 
-	// Return scheme + host (includes port if present)
-	return parsedURL.Scheme + "://" + parsedURL.Host
+	// Extract hostname without port
+	hostname := parsedURL.Hostname()
+	if hostname == "" {
+		w.logger.Debug("Failed to extract hostname from URL %s", fullURL)
+		return parsedURL.Host // Fallback to host with port
+	}
+
+	w.logger.Debug("Extracted base host: %s from URL: %s", hostname, fullURL)
+	return hostname
 }

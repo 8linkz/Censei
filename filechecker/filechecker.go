@@ -148,7 +148,7 @@ func (fc *FileChecker) CheckFileURL(fileURL string) (bool, string, error) {
 		return false, "", fmt.Errorf("file checking functionality is disabled")
 	}
 
-	fc.logger.Info("Checking file: %s", fileURL)
+	fc.logger.Debug("Checking file: %s", fileURL)
 
 	// Create the request
 	req, err := http.NewRequest("HEAD", fileURL, nil)

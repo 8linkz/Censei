@@ -21,6 +21,8 @@ type Config struct {
 	MaxLinksPerDirectory  int    `json:"max_links_per_directory"`
 	MaxTotalLinks         int    `json:"max_total_links"`
 	MaxSkipsBeforeBlock   int    `json:"max_skips_before_block"`
+	EnableBlocklist       bool   `json:"enable_blocklist"`
+	BlocklistFile         string `json:"blocklist_file"`
 }
 
 // Query represents a predefined Censys query with its filters
@@ -43,6 +45,8 @@ func LoadConfig(path string) (*Config, error) {
 		MaxConcurrentRequests: 10,
 		LogLevel:              "INFO",
 		LogFile:               "./censei.log",
+		EnableBlocklist:       true,
+		BlocklistFile:         "./blocked_hosts.txt",
 	}
 
 	// Read config file

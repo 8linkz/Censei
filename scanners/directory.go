@@ -38,7 +38,7 @@ func (ds *DirectoryScanner) ScanHost(host api.Host, htmlContent string) []string
 	// Extract links from HTML content
 	links := ds.extractLinks(host.URL, htmlContent)
 
-	ds.logger.Info("Directory scan found %d links for %s", len(links), host.URL)
+	ds.logger.Debug("Directory scan found %d links for %s", len(links), host.URL)
 	return links
 }
 
@@ -163,6 +163,11 @@ func (ds *DirectoryScanner) extractLinks(baseURLStr string, htmlContent string) 
 			return
 		}
 
+		// Skip Apache directory listing sort links
+		if strings.HasPrefix(href, "?C=") {
+			return
+		}
+
 		// Resolve relative URLs to absolute URLs
 		fileURL, err := url.Parse(href)
 		if err != nil {
@@ -175,7 +180,11 @@ func (ds *DirectoryScanner) extractLinks(baseURLStr string, htmlContent string) 
 		ds.logger.Debug("Found directory link: %s", absoluteURL)
 	})
 
-	ds.logger.Info("Extracted %d links from directory index at %s", len(links), baseURLStr)
+	if len(links) > 0 {
+		ds.logger.Info("Extracted %d links from directory index at %s", len(links), baseURLStr)
+	} else {
+		ds.logger.Debug("Extracted 0 links from directory index at %s", baseURLStr)
+	}
 	return links
 }
 
