@@ -6,5 +6,8 @@
     "http_timeout_seconds": 5,
     "max_concurrent_requests": 10,
     "log_level": "INFO",
-    "log_file": "./censei.log"
+    "log_file": "./censei.log",
+    "max_links_per_directory": 500,
+    "max_total_links": 10000,
+    "max_skips_before_block": 5
 }

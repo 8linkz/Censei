@@ -18,6 +18,9 @@ type Config struct {
 	LogFile               string `json:"log_file"`
 	CheckDir              string `json:"check_dir"`
 	BinaryOutputFile      string `json:"binary_output_file"`
+	MaxLinksPerDirectory  int    `json:"max_links_per_directory"`
+	MaxTotalLinks         int    `json:"max_total_links"`
+	MaxSkipsBeforeBlock   int    `json:"max_skips_before_block"`
 }
 
 // Query represents a predefined Censys query with its filters
@@ -27,6 +30,8 @@ type Query struct {
 	Filters        []string `json:"filters"`
 	Check          bool     `json:"check"`
 	TargetFileName string   `json:"target_filename"`
+	Recursive      string   `json:"recursive"`
+	MaxDepth       int      `json:"max-depth"`
 }
 
 // LoadConfig loads and validates the application configuration from a file

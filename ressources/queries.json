@@ -2,6 +2,8 @@
     {
         "name": "Russia Suspicious OpenDir",
         "query": "labels:suspicious-open-dir and location.country_code:RU",
+        "recursive": "yes",
+        "max-depth": 3,
         "filters": [
             ".pdf",
             ".lnk",
@@ -14,6 +16,8 @@
     {
         "name": "US OpenDir",
         "query": "labels:open-dir and location.country_code:US",
+        "recursive": "yes",
+        "max-depth": 3,
         "filters": [
             ".exe",
             ".zip",
@@ -26,6 +30,8 @@
     {
         "name": "Germany Suspicious OpenDir",
         "query": "labels:suspicious-open-dir and location.country_code:DE",
+        "recursive": "yes",
+        "max-depth": 3,
         "filters": [
             ".pdf",
             ".exe",
@@ -38,6 +44,8 @@
     {
         "name": "WsgiDAV",
         "query": "services.http.response.html_tags:\"<title>WsgiDAV - Index of /</title>\"",
+        "recursive": "yes",
+        "max-depth": 3,
         "filters": [
             ".pdf",
             ".exe",
