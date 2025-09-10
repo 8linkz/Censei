@@ -46,6 +46,8 @@ func main() {
 	logLevel := flag.String("log-level", "", "Override log level (DEBUG, INFO, ERROR)")
 	checkFlag := flag.Bool("check", false, "Enable targeted file checking mode - skips HTML processing and link extraction, directly checks hosts for specific binary files")
 	targetFile := flag.String("target-file", "", "Specific file to check for on hosts")
+	recursiveFlag := flag.Bool("recursive", false, "Enable recursive directory scanning")
+	maxDepthFlag := flag.Int("max-depth", 1, "Maximum depth for recursive scanning")
 	flag.Parse()
 
 	// Initialize logging system
@@ -88,13 +90,25 @@ func main() {
 	// If a direct query is provided, run it
 	if *queryStr != "" {
 		logger.Info("Running direct query: %s", *queryStr)
-		// Create a filter slice from the filter string
+
+		// Create query config from command line parameters
 		var filters []string
 		if *filterStr != "" {
 			filters = cli.ParseFilters(*filterStr)
 		}
-		// Run the query with check options
-		runQuery(cfg, *queryStr, filters, *checkFlag, *targetFile, logger)
+
+		// Create query object for command line query
+		queryConfig := &config.Query{
+			Name:           "Command Line Query",
+			Query:          *queryStr,
+			Filters:        filters,
+			Check:          *checkFlag,
+			TargetFileName: *targetFile,
+			Recursive:      boolToYesNo(*recursiveFlag),
+			MaxDepth:       *maxDepthFlag,
+		}
+
+		runQueryConfig(cfg, queryConfig, logger)
 	} else {
 		// Start interactive mode
 		selectedQuery, selectedFilters, checkEnabled, targetFileName := cli.ShowMenuWithCheck(
@@ -103,11 +117,59 @@ func main() {
 			logger.Error("No query selected, exiting")
 			os.Exit(0)
 		}
-		runQuery(cfg, selectedQuery, selectedFilters, checkEnabled, targetFileName, logger)
+
+		// Find the selected query config
+		var queryConfig *config.Query
+		for _, q := range queries {
+			if q.Query == selectedQuery {
+				queryConfig = &q
+				// Override with command line parameters if provided
+				if *filterStr != "" {
+					queryConfig.Filters = selectedFilters
+				}
+				if *checkFlag {
+					queryConfig.Check = checkEnabled
+				}
+				if *targetFile != "" {
+					queryConfig.TargetFileName = targetFileName
+				}
+				if *recursiveFlag {
+					queryConfig.Recursive = "yes"
+				}
+				if *maxDepthFlag > 1 {
+					queryConfig.MaxDepth = *maxDepthFlag
+				}
+				break
+			}
+		}
+
+		// If no predefined query found, create custom query
+		if queryConfig == nil {
+			queryConfig = &config.Query{
+				Name:           "Custom Query",
+				Query:          selectedQuery,
+				Filters:        selectedFilters,
+				Check:          checkEnabled,
+				TargetFileName: targetFileName,
+				Recursive:      boolToYesNo(*recursiveFlag),
+				MaxDepth:       *maxDepthFlag,
+			}
+		}
+
+		runQueryConfig(cfg, queryConfig, logger)
 	}
 }
 
-func runQuery(cfg *config.Config, query string, filters []string, check bool, targetFileName string, logger *logging.Logger) {
+// boolToYesNo converts a boolean to "yes"/"no" string
+func boolToYesNo(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
+}
+
+// runQueryConfig runs a query using a complete Query configuration object
+func runQueryConfig(cfg *config.Config, queryConfig *config.Query, logger *logging.Logger) {
 	startTime := time.Now()
 
 	// Initialize statistics
@@ -127,11 +189,18 @@ func runQuery(cfg *config.Config, query string, filters []string, check bool, ta
 		binaryFilesFound: 0,
 	}
 
+	// Log query configuration
+	logger.Info("Query: %s", queryConfig.Query)
+	logger.Info("Recursive: %s", queryConfig.Recursive)
+	if queryConfig.Recursive == "yes" {
+		logger.Info("Max Depth: %d", queryConfig.MaxDepth)
+	}
+
 	// Initialize Censys client
 	censysClient := api.NewCensysClient(cfg.APIKey, cfg.APISecret, logger)
 
 	// Execute Censys query
-	jsonPath, err := censysClient.ExecuteQuery(query, cfg.OutputDir)
+	jsonPath, err := censysClient.ExecuteQuery(queryConfig.Query, cfg.OutputDir)
 	if err != nil {
 		logger.Error("Failed to execute Censys query: %v", err)
 		os.Exit(1)
@@ -155,33 +224,35 @@ func runQuery(cfg *config.Config, query string, filters []string, check bool, ta
 	defer writer.Close()
 
 	// Initialize filter
-	fileFilter := filter.NewFilter(filters, logger)
+	fileFilter := filter.NewFilter(queryConfig.Filters, logger)
 	logger.Info("Using filters: %v", fileFilter.GetFilterExtensions())
 
 	// Initialize crawler components
 	client := crawler.NewClient(cfg.HTTPTimeoutSeconds, logger)
 
-	// Initialize worker
+	// Initialize worker with query config
 	worker := crawler.NewWorker(
 		client,
 		fileFilter,
 		writer,
 		logger,
+		queryConfig,
+		cfg,
 		cfg.MaxConcurrentRequests,
 	)
 
 	// Initialize file checker if enabled
-	if check {
+	if queryConfig.Check {
 		logger.Info("File checking functionality enabled, looking for binary files")
-		if targetFileName != "" {
-			logger.Info("Target filename: %s", targetFileName)
+		if queryConfig.TargetFileName != "" {
+			logger.Info("Target filename: %s", queryConfig.TargetFileName)
 		}
 
 		// Create file checker
 		fileChecker := filechecker.NewFileChecker(cfg.HTTPTimeoutSeconds, logger)
 
 		// Set file checker in worker
-		worker.SetFileChecker(fileChecker, true, targetFileName)
+		worker.SetFileChecker(fileChecker, true, queryConfig.TargetFileName)
 	}
 
 	// Process hosts
@@ -193,7 +264,7 @@ func runQuery(cfg *config.Config, query string, filters []string, check bool, ta
 	// Generate and write summary
 	endTime := time.Now()
 	summary := output.FormatSummary(
-		query,
+		queryConfig.Query,
 		stats.totalHosts,
 		stats.onlineHosts,
 		stats.totalFiles,
@@ -203,8 +274,8 @@ func runQuery(cfg *config.Config, query string, filters []string, check bool, ta
 		fileFilter.GetFilterExtensions(),
 		startTime,
 		endTime,
-		check,
-		targetFileName,
+		queryConfig.Check,
+		queryConfig.TargetFileName,
 		cfg.BinaryOutputFile,
 	)
 
