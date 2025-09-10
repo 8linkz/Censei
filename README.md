@@ -13,8 +13,11 @@ Censei (pronounced like "Sensei") is a command-line tool written in Go that uses
 - Efficient search for open directories with Censys
 - Automatic host availability checking
 - Intelligent crawling of directory indexes
+- Recursive directory scanning with configurable depth
 - Flexible filtering by file extensions
 - Parallel processing for higher speed
+- Smart host blocking with persistent blocklist
+- Performance limits to prevent resource exhaustion
 - Detailed outputs (raw and filtered)
 - Configurable logging
 - Interactive and automated modes
@@ -75,7 +78,12 @@ Create two configuration files:
      "http_timeout_seconds": 5,
      "max_concurrent_requests": 10,
      "log_level": "INFO",
-     "log_file": "./censei.log"
+     "log_file": "./censei.log",
+     "max_links_per_directory": 500,
+     "max_total_links": 10000,
+     "max_skips_before_block": 5,
+     "enable_blocklist": true,
+     "blocklist_file": "./blocked_hosts.txt"
    }
    ```
 
@@ -85,17 +93,16 @@ Create two configuration files:
      {
        "name": "Russia Suspicious OpenDir",
        "query": "labels:suspicious-open-dir and location.country_code:RU",
+       "recursive": "yes",
+       "max-depth": 3,
        "filters": [".pdf", ".lnk", ".exe", ".elf"]
      },
      {
        "name": "US OpenDir",
        "query": "labels:open-dir and location.country_code:US",
+       "recursive": "yes",
+       "max-depth": 3,
        "filters": [".docx", ".zip", ".xlsx"]
-     },
-     {
-       "name": "Germany Suspicious OpenDir",
-       "query": "labels:suspicious-open-dir and location.country_code:DE",
-       "filters": [".doc", ".pdf", ".exe"]
      },
      {
        "name": "Cobalt Strike Scanner",
@@ -124,6 +131,11 @@ Start Censei in interactive mode:
 **Direct query with specific filters:**
 ```bash
 ./censei --query="labels:suspicious-open-dir and location.country_code:RU" --filter=".pdf,.exe"
+```
+
+**Recursive scanning with depth limit:**
+```bash
+./censei --recursive --max-depth=3 --query="labels:open-dir and location.country_code:US"
 ```
 
 **Query with custom output path:**
@@ -158,6 +170,8 @@ Start Censei in interactive mode:
 | `--log-level` | Set log level (DEBUG, INFO, ERROR) | From configuration |
 | `--check` | Enables the File Checker mode - skips HTML processing and link extraction, instead checks hosts directly for specific binary files | `false` |
 | `--target-file` | Specifies the specific file to search for in File Checker mode | - |
+| `--recursive` | Enable recursive directory scanning | `false` |
+| `--max-depth` | Maximum depth for recursive scanning (requires --recursive) | `1` |
 
 ### Interactive Mode vs. Direct Queries
 
@@ -179,6 +193,11 @@ For automation or scripts, use the `--query` parameter to execute a specific que
 | `max_concurrent_requests` | Maximum parallel requests | `10` |
 | `log_level` | Logging level (DEBUG, INFO, ERROR) | `INFO` |
 | `log_file` | Path to log file | `./censei.log` |
+| `max_links_per_directory` | Maximum links to process per directory | `500` |
+| `max_total_links` | Total link limit per host before skipping | `10000` |
+| `max_skips_before_block` | Number of skips before blocking entire host | `5` |
+| `enable_blocklist` | Enable persistent host blocking functionality | `true` |
+| `blocklist_file` | Path to file storing permanently blocked hosts | `./blocked_hosts.txt` |
 
 ### queries.json Structure
 
@@ -191,6 +210,8 @@ The queries.json file contains an array of query objects, each with:
 | `filters` | Array of file extensions to filter | `[".pdf", ".exe", ".elf"]` |
 | `check` | Enables File Checker mode for this query | `true` |
 | `target_filename` | Specific file to search for in File Checker mode | `"02.08.2022.exe"` |
+| `recursive` | Enable recursive scanning ("yes"/"no") | `"yes"` |
+| `max-depth` | Maximum scanning depth for recursive mode | `3` |
 
 ## Output Files
 
@@ -235,6 +256,31 @@ http://example.com/tools/app.exe with Content-Type: application/octet-stream
 At the end of each file, a summary of the scan with statistics and configuration details is appended.
 
 ## Advanced Features
+
+### Recursive Directory Scanning
+
+Censei supports recursive directory scanning to automatically explore subdirectories:
+
+- **Enable recursion**: Set `"recursive": "yes"` in queries.json or use `--recursive` flag
+- **Control depth**: Configure `"max-depth": 3` or use `--max-depth=3` to limit scanning depth
+- **Performance protection**: Built-in limits prevent infinite recursion and resource exhaustion
+
+### Smart Host Blocking
+
+The tool includes intelligent host management to improve scanning efficiency:
+
+- **Automatic blocking**: Hosts exceeding limits are automatically blocked
+- **Persistent blocklist**: Blocked hosts are saved to file and persist between sessions
+- **Configurable thresholds**: Adjust `max_skips_before_block` to control blocking sensitivity
+- **Performance optimization**: Prevents wasting time on problematic hosts
+
+### Performance Limits
+
+Built-in safeguards prevent resource exhaustion:
+
+- **Per-directory limits**: `max_links_per_directory` controls links processed per directory
+- **Total link limits**: `max_total_links` sets overall limit per host
+- **Memory protection**: Prevents excessive memory usage during large directory scans
 
 ### File Checker Mode
 
