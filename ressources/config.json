@@ -1,6 +1,21 @@
 {
+    "_comment_legacy": "Legacy API settings (used with -legacy flag)",
     "api_key": "your-api-key",
     "api_secret": "your-api-secret",
+    "_comment_v3": "Platform API v3 settings (default mode)",
+    "bearer_token": "add-your-bearer-token-here",
+    "organization_id": "",
+    "v3_max_results": 500,
+    "_comment_legacy_cli": "Legacy CLI parameters for censys-cli tool",
+    "legacy_pages": 25,
+    "legacy_per_page": 100,
+    "legacy_index_type": "hosts",
+    "legacy_sort_order": "DESCENDING",
+    "legacy_virtual_hosts": "INCLUDE",
+    "_comment_queries": "Query file paths (optional, defaults: ./queriesv3.json and ./legacy_queries.json)",
+    "queries_file_v3": "./queriesv3.json",
+    "queries_file_legacy": "./legacy_queries.json",
+    "_comment_general": "General application settings",
     "output_dir": "./output",
     "binary_output_file": "./output/binary_found.txt",
     "http_timeout_seconds": 5,
@@ -10,6 +25,6 @@
     "max_links_per_directory": 500,
     "max_total_links": 10000,
     "max_skips_before_block": 5,
-    "enable_blocklist": true,
-    "blocklist_file": "./blocked_hosts.txt"
+    "blocklist_file": "./blocklist.txt",
+    "enable_blocklist": false
 }

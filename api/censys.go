@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 
+	"censei/config"
 	"censei/logging"
 )
 
@@ -15,14 +17,16 @@ import (
 type CensysClient struct {
 	APIID     string
 	APISecret string
+	Config    *config.Config
 	Logger    *logging.Logger
 }
 
 // NewCensysClient creates a new client for Censys API interactions
-func NewCensysClient(apiID, apiSecret string, logger *logging.Logger) *CensysClient {
+func NewCensysClient(apiID, apiSecret string, cfg *config.Config, logger *logging.Logger) *CensysClient {
 	return &CensysClient{
 		APIID:     apiID,
 		APISecret: apiSecret,
+		Config:    cfg,
 		Logger:    logger,
 	}
 }
@@ -35,17 +39,17 @@ func (c *CensysClient) ExecuteQuery(query, outputDir string) (string, error) {
 	c.Logger.Info("Executing Censys query: %s", query)
 	c.Logger.Debug("Output will be saved to: %s", outputPath)
 
-	// Build command
-	c.Logger.Debug("Creating censys command with API credentials")
+	// Build command with config values
+	c.Logger.Debug("Creating censys command with API credentials and config parameters")
 	cmd := exec.Command(
 		"censys", "search",
 		"--api-id", c.APIID,
 		"--api-secret", c.APISecret,
-		"--page", "25",
-		"--per-page", "100",
-		"--index-type", "hosts",
-		"--sort-order", "DESCENDING",
-		"--virtual-hosts", "INCLUDE",
+		"--page", strconv.Itoa(c.Config.LegacyPages),
+		"--per-page", strconv.Itoa(c.Config.LegacyPerPage),
+		"--index-type", c.Config.LegacyIndexType,
+		"--sort-order", c.Config.LegacySortOrder,
+		"--virtual-hosts", c.Config.LegacyVirtualHosts,
 		"--output", outputPath,
 		query,
 	)
@@ -142,8 +146,10 @@ func (c *CensysClient) ExtractHostsFromResults(jsonPath string) ([]Host, error) 
 		c.Logger.Debug("Successfully parsed JSON as array with %d results", len(results))
 	}
 
-	// Extract hosts
-	hosts := make([]Host, 0)
+	// Extract hosts - pre-allocate with estimated capacity
+	// Estimate: results × average services per result (typically 2-5)
+	estimatedHosts := len(results) * 3
+	hosts := make([]Host, 0, estimatedHosts)
 
 	for i, result := range results {
 		c.Logger.Debug("Processing result #%d: IP=%s, Services=%d",
@@ -176,19 +182,26 @@ func (c *CensysClient) ExtractHostsFromResults(jsonPath string) ([]Host, error) 
 				protocol = "https"
 			}
 
+			// Format address for URL (add brackets for IPv6)
+			addressForURL := baseAddress
+			if isIPv6(baseAddress) {
+				addressForURL = fmt.Sprintf("[%s]", baseAddress)
+			}
+
 			host := Host{
 				BaseAddress: baseAddress,
 				IP:          result.IP,
 				Port:        service.Port,
 				Protocol:    protocol,
-				URL:         fmt.Sprintf("%s://%s:%d", protocol, baseAddress, service.Port),
+				URL:         fmt.Sprintf("%s://%s:%d", protocol, addressForURL, service.Port),
 			}
 
 			// Special case for standard ports
-			if service.Port == 443 {
-				host.URL = fmt.Sprintf("https://%s", baseAddress)
-			} else if service.Port == 80 {
-				host.URL = fmt.Sprintf("http://%s", baseAddress)
+			switch service.Port {
+			case 443:
+				host.URL = fmt.Sprintf("https://%s", addressForURL)
+			case 80:
+				host.URL = fmt.Sprintf("http://%s", addressForURL)
 			}
 
 			c.Logger.Debug("Created host #%d.%d: %s", i, j, host.URL)

@@ -13,21 +13,34 @@ import (
 
 // Blocklist manages a persistent list of blocked hosts
 type Blocklist struct {
-	hosts    map[string]time.Time // hostname -> timestamp when blocked
-	filePath string
-	enabled  bool
-	logger   *logging.Logger
-	mu       sync.RWMutex
+	hosts      map[string]time.Time // hostname -> timestamp when blocked
+	filePath   string
+	enabled    bool
+	logger     *logging.Logger
+	mu         sync.RWMutex
+	saveChan   chan struct{} // Signal channel for save requests
+	stopChan   chan struct{} // Channel to stop the save worker
+	saveWg     sync.WaitGroup
 }
 
 // NewBlocklist creates a new blocklist instance
 func NewBlocklist(filePath string, enabled bool, logger *logging.Logger) *Blocklist {
-	return &Blocklist{
+	b := &Blocklist{
 		hosts:    make(map[string]time.Time),
 		filePath: filePath,
 		enabled:  enabled,
 		logger:   logger,
+		saveChan: make(chan struct{}, 1), // Buffered channel to avoid blocking
+		stopChan: make(chan struct{}),
 	}
+
+	// Start background save worker if blocklist is enabled
+	if enabled {
+		b.saveWg.Add(1)
+		go b.saveWorker()
+	}
+
+	return b
 }
 
 // Load reads the blocklist from file if it exists
@@ -100,9 +113,20 @@ func (b *Blocklist) Save() error {
 		return nil
 	}
 
+	// Use read lock since we're only reading the map, not modifying it
+	// File I/O happens outside the map access
 	b.mu.RLock()
-	defer b.mu.RUnlock()
 
+	// Copy data to avoid holding lock during I/O
+	hostsCopy := make(map[string]time.Time, len(b.hosts))
+	for hostname, timestamp := range b.hosts {
+		hostsCopy[hostname] = timestamp
+	}
+	hostCount := len(b.hosts)
+
+	b.mu.RUnlock()
+
+	// Perform file I/O without holding any locks
 	file, err := os.Create(b.filePath)
 	if err != nil {
 		return fmt.Errorf("failed to create blocklist file: %w", err)
@@ -114,12 +138,12 @@ func (b *Blocklist) Save() error {
 	fmt.Fprintf(file, "# Format: hostname timestamp\n")
 	fmt.Fprintf(file, "# Hosts that exceeded skip limits and are permanently blocked\n\n")
 
-	// Write hosts
-	for hostname, timestamp := range b.hosts {
+	// Write hosts from the copy
+	for hostname, timestamp := range hostsCopy {
 		fmt.Fprintf(file, "%s %s\n", hostname, timestamp.Format(time.RFC3339))
 	}
 
-	b.logger.Info("Saved %d blocked hosts to %s", len(b.hosts), b.filePath)
+	b.logger.Info("Saved %d blocked hosts to %s", hostCount, b.filePath)
 	return nil
 }
 
@@ -149,13 +173,75 @@ func (b *Blocklist) AddHost(hostname string) {
 		b.hosts[hostname] = time.Now()
 		b.logger.Info("Added host to blocklist: %s", hostname)
 
-		// Auto-save after adding new host
-		go func() {
-			if err := b.Save(); err != nil {
-				b.logger.Error("Failed to save blocklist after adding host: %v", err)
-			}
-		}()
+		// Signal the save worker to save (non-blocking)
+		select {
+		case b.saveChan <- struct{}{}:
+			// Successfully signaled save
+		default:
+			// Channel already has a pending save signal, skip
+		}
 	}
+}
+
+// saveWorker runs in background and handles debounced saves
+func (b *Blocklist) saveWorker() {
+	defer b.saveWg.Done()
+
+	saveTimer := time.NewTimer(0)
+	<-saveTimer.C // Drain initial timer
+
+	pendingSave := false
+
+	for {
+		select {
+		case <-b.saveChan:
+			// New save request received
+			if !pendingSave {
+				// Start debounce timer (wait 500ms for more changes)
+				saveTimer.Reset(500 * time.Millisecond)
+				pendingSave = true
+			}
+			// If already pending, just wait for the timer
+
+		case <-saveTimer.C:
+			// Timer expired, perform save
+			if pendingSave {
+				if err := b.Save(); err != nil {
+					b.logger.Error("Failed to save blocklist: %v", err)
+				}
+				pendingSave = false
+			}
+
+		case <-b.stopChan:
+			// Shutdown requested
+			saveTimer.Stop()
+
+			// Perform final save if there were pending changes
+			if pendingSave {
+				b.logger.Info("Performing final blocklist save before shutdown")
+				if err := b.Save(); err != nil {
+					b.logger.Error("Failed to save blocklist on shutdown: %v", err)
+				}
+			}
+			return
+		}
+	}
+}
+
+// Close gracefully shuts down the blocklist and performs a final save
+func (b *Blocklist) Close() error {
+	if !b.enabled {
+		return nil
+	}
+
+	// Signal the save worker to stop
+	close(b.stopChan)
+
+	// Wait for save worker to finish
+	b.saveWg.Wait()
+
+	b.logger.Debug("Blocklist closed successfully")
+	return nil
 }
 
 // GetBlockedCount returns the number of blocked hosts

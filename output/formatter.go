@@ -50,7 +50,7 @@ func FormatSummary(
 
 	// Add download information to summary
 	if downloadEnabled {
-		summary.WriteString(fmt.Sprintf("File check enabled: Yes\n"))
+		summary.WriteString("File check enabled: Yes\n")
 		if targetFileName != "" {
 			summary.WriteString(fmt.Sprintf("Target filename: %s\n", targetFileName))
 		}

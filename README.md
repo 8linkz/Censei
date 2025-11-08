@@ -38,8 +38,9 @@ Censei (pronounced like "Sensei") is a command-line tool written in Go that uses
 ### Prerequisites
 
 - Go 1.20 or higher
-- Censys CLI ([Installation via pip](https://github.com/censys/censys-command-line))
 - **Censys subscription** for API access (important: This tool does not work without a valid Censys subscription and API credentials!)
+- **For Platform API v3 mode (default):** Censys API credentials (API ID and Secret)
+- **For Legacy mode (optional):** Censys CLI ([Installation via pip](https://github.com/censys/censys-command-line))
 
 ### Installation
 
@@ -54,7 +55,7 @@ Censei (pronounced like "Sensei") is a command-line tool written in Go that uses
    go build
    ```
 
-3. Install Censys CLI:
+3. (Optional) Install Censys CLI for legacy mode:
    ```bash
    pip install censys-command-line
    ```
@@ -66,13 +67,28 @@ Censei (pronounced like "Sensei") is a command-line tool written in Go that uses
 
 ### Setting up configuration files
 
-Create two configuration files:
+Censei supports two API modes:
+
+- **Platform API v3 (default):** Uses the modern Censys Platform API with bearer token authentication
+- **Legacy mode:** Uses the older Censys CLI tool (activated with `--legacy` flag)
+
+Create the configuration files:
 
 1. **config.json** - Basic settings:
    ```json
    {
      "api_key": "your-censys-api-key",
      "api_secret": "your-censys-api-secret",
+     "bearer_token": "your-platform-api-bearer-token",
+     "organization_id": "",
+     "v3_max_results": 500,
+     "legacy_pages": 25,
+     "legacy_per_page": 100,
+     "legacy_index_type": "hosts",
+     "legacy_sort_order": "DESCENDING",
+     "legacy_virtual_hosts": "INCLUDE",
+     "queries_file_v3": "./queriesv3.json",
+     "queries_file_legacy": "./legacy_queries.json",
      "output_dir": "./output",
      "binary_output_file": "./output/binary_found.txt",
      "http_timeout_seconds": 5,
@@ -82,12 +98,14 @@ Create two configuration files:
      "max_links_per_directory": 500,
      "max_total_links": 10000,
      "max_skips_before_block": 5,
-     "enable_blocklist": true,
-     "blocklist_file": "./blocked_hosts.txt"
+     "enable_blocklist": false,
+     "blocklist_file": "./blocklist.txt"
    }
    ```
 
-2. **queries.json** - Predefined queries:
+   > **Note**: The `queries_file_v3` and `queries_file_legacy` fields are optional. If not specified, they default to `./queriesv3.json` and `./legacy_queries.json` respectively. Adjust these paths to match your directory structure.
+
+2. **queriesv3.json** (for Platform API v3 mode) OR **legacy_queries.json** (for legacy mode) - Predefined queries:
    ```json
    [
      {
@@ -114,7 +132,10 @@ Create two configuration files:
    ]
    ```
 
-> **IMPORTANT**: You need a valid Censys subscription to obtain API key and secret. Without these credentials, Censei cannot perform queries. Visit [https://censys.io/plans](https://censys.io/plans) for subscription information.
+> **IMPORTANT**:
+> - For **Platform API v3 mode (default)**: Use `queriesv3.json` and provide API credentials in config.json
+> - For **Legacy mode**: Use `legacy_queries.json`, install Censys CLI, and use the `--legacy` flag
+> - Visit [https://censys.io/plans](https://censys.io/plans) for subscription information
 
 ## Usage
 
@@ -153,6 +174,11 @@ Start Censei in interactive mode:
 ./censei --config=/path/to/config.json --queries=/path/to/queries.json
 ```
 
+**Using legacy mode with Censys CLI:**
+```bash
+./censei --legacy --queries=legacy_queries.json
+```
+
 **Enabling File Checker mode:**
 ```bash
 ./censei --check --target-file="suspicious.exe"
@@ -163,12 +189,13 @@ Start Censei in interactive mode:
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--config` | Path to configuration file | `./config.json` |
-| `--queries` | Path to queries file | `./queries.json` |
+| `--queries` | Path to queries file | `./queriesv3.json` (or `./legacy_queries.json` in legacy mode) |
 | `--query` | Direct execution of a specific query | - |
 | `--filter` | Specification of file extensions to filter (comma-separated) | - |
 | `--output` | Override output directory | From configuration |
 | `--log-level` | Set log level (DEBUG, INFO, ERROR) | From configuration |
-| `--check` | Enables the File Checker mode - skips HTML processing and link extraction, instead checks hosts directly for specific binary files | `false` |
+| `--legacy` | Use legacy Censys CLI mode instead of Platform API v3 | `false` |
+| `--check` | Enables the File Checker mode - checks hosts for specific binary files (still processes directories if target not found) | `false` |
 | `--target-file` | Specifies the specific file to search for in File Checker mode | - |
 | `--recursive` | Enable recursive directory scanning | `false` |
 | `--max-depth` | Maximum depth for recursive scanning (requires --recursive) | `1` |
@@ -176,6 +203,15 @@ Start Censei in interactive mode:
 ### Interactive Mode vs. Direct Queries
 
 When the tool is started without the `--query` parameter, Censei starts in interactive mode and presents a menu with predefined queries from your queries.json file. This mode is user-friendly and ideal for exploration.
+
+**Interactive Menu Features:**
+- Displays up to 25 queries per page with pagination
+- Shows query details (filters, recursive settings, target files)
+- Navigation commands:
+  - `[1-N]` - Select a query by number
+  - `[c]` - Enter a custom query
+  - `[n]` - Next page (if more queries available)
+  - `[p]` - Previous page (if on page 2+)
 
 For automation or scripts, use the `--query` parameter to execute a specific query directly without user interaction.
 
@@ -185,8 +221,18 @@ For automation or scripts, use the `--query` parameter to execute a specific que
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `api_key` | Your Censys API key | - |
-| `api_secret` | Your Censys API secret | - |
+| `api_key` | Your Censys API key (legacy mode) | - |
+| `api_secret` | Your Censys API secret (legacy mode) | - |
+| `bearer_token` | Your Platform API v3 bearer token | - |
+| `organization_id` | Organization ID for Platform API v3 (optional) | `""` |
+| `v3_max_results` | Maximum results for Platform API v3 queries | `500` |
+| `legacy_pages` | Number of pages for legacy CLI queries | `25` |
+| `legacy_per_page` | Results per page for legacy CLI | `100` |
+| `legacy_index_type` | Index type for legacy CLI (hosts, certificates) | `hosts` |
+| `legacy_sort_order` | Sort order for legacy CLI (ASCENDING, DESCENDING) | `DESCENDING` |
+| `legacy_virtual_hosts` | Virtual hosts setting for legacy CLI (INCLUDE, EXCLUDE, ONLY) | `INCLUDE` |
+| `queries_file_v3` | Path to Platform API v3 queries file (optional) | `./queriesv3.json` |
+| `queries_file_legacy` | Path to legacy mode queries file (optional) | `./legacy_queries.json` |
 | `output_dir` | Directory for output files | `./output` |
 | `binary_output_file` | Path for binary file outputs | `./output/binary_found.txt` |
 | `http_timeout_seconds` | Timeout for HTTP requests | `5` |
@@ -196,8 +242,8 @@ For automation or scripts, use the `--query` parameter to execute a specific que
 | `max_links_per_directory` | Maximum links to process per directory | `500` |
 | `max_total_links` | Total link limit per host before skipping | `10000` |
 | `max_skips_before_block` | Number of skips before blocking entire host | `5` |
-| `enable_blocklist` | Enable persistent host blocking functionality | `true` |
-| `blocklist_file` | Path to file storing permanently blocked hosts | `./blocked_hosts.txt` |
+| `enable_blocklist` | Enable persistent host blocking functionality | `false` |
+| `blocklist_file` | Path to file storing permanently blocked hosts | `./blocklist.txt` |
 
 ### queries.json Structure
 
@@ -253,7 +299,7 @@ http://example.com/02.08.2022.exe with Content-Type: application/x-msdownload
 http://example.com/tools/app.exe with Content-Type: application/octet-stream
 ```
 
-At the end of each file, a summary of the scan with statistics and configuration details is appended.
+At the end of the raw.txt file, a summary of the scan with statistics and configuration details is appended.
 
 ## Advanced Features
 
@@ -287,9 +333,10 @@ Built-in safeguards prevent resource exhaustion:
 The File Checker mode is a special operating mode optimized for targeted searching for binary files:
 
 - Activated by `check: true` in queries.json or `--check` on the command line
-- Completely skips HTML processing and link extraction
-- Checks each host only for the presence of a specific file (specified by `target_filename`)
-- Checks only small parts of the file (headers) to determine the file type
+- When a `target_filename` is specified, checks hosts for that specific file first
+- If the target file is found, skips further HTML processing for that host
+- If the target file is NOT found, continues with normal directory scanning
+- Uses GET requests with partial reads (512 bytes) to determine file type
 - Does not save files to disk
 - Optimized for quick identification of potentially harmful binary files
 
@@ -298,14 +345,15 @@ This mode is especially useful for security analysts looking for specific binary
 ### Binary File Detection
 
 Censei can detect binary files based on their Content-Type headers, including:
-- application/octet-stream
-- application/x-executable
-- application/x-msdos-program
-- application/x-msdownload
-- application/exe
-- application/binary
+- **Generic binary**: application/octet-stream, application/binary
+- **Executables**: application/x-executable, application/x-msdownload, application/exe, application/x-dosexec
+- **Archives (ZIP)**: application/zip, application/x-zip-compressed
+- **Archives (RAR, 7Z, TAR, GZ)**: application/x-rar, application/x-7z-compressed, application/x-tar, application/gzip
+- **Scripts**: application/x-sh, application/x-bat
 
-The tool checks HTTP headers first (using HEAD requests) to efficiently determine file types without downloading large files.
+**Detection Methods:**
+- **General file checking**: Uses HEAD requests to check Content-Type headers without downloading files
+- **Targeted file checking** (with `--target-file`): Uses GET requests with partial reads (512 bytes) to verify file type and content
 
 ### Customizing Filters
 

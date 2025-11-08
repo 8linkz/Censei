@@ -1,0 +1,84 @@
+[
+    {
+        "name": "Legacy: Russia Suspicious OpenDir",
+        "query": "labels:suspicious-open-dir and location.country_code:RU",
+        "recursive": "yes",
+        "max-depth": 2,
+        "filters": [
+            ".pdf",
+            ".lnk",
+            ".ps1",
+            ".bat",
+            ".scr",
+            ".exe"
+        ]
+    },
+    {
+        "name": "Legacy: US OpenDir",
+        "query": "labels:open-dir and location.country_code:US",
+        "recursive": "yes",
+        "max-depth": 2,
+        "filters": [
+            ".exe",
+            ".zip",
+            ".ps1",
+            ".bat",
+            ".scr",
+            ".lnk"
+        ]
+    },
+    {
+        "name": "Legacy: Germany Suspicious OpenDir",
+        "query": "labels:suspicious-open-dir and location.country_code:DE",
+        "recursive": "yes",
+        "max-depth": 2,
+        "filters": [
+            ".pdf",
+            ".exe",
+            ".ps1",
+            ".bat",
+            ".scr",
+            ".lnk"
+        ]
+    },
+    {
+        "name": "Legacy: WsgiDAV",
+        "query": "services.http.response.html_tags:\"<title>WsgiDAV - Index of /</title>\"",
+        "recursive": "yes",
+        "max-depth": 2,
+        "filters": [
+            ".pdf",
+            ".exe",
+            ".lnk",
+            ".ps1",
+            ".scr",
+            ".bat"
+        ]
+    },
+    {
+        "name": "Legacy: MooBot",
+        "query": "services.software.vendor=\"MooBot\" or services.http.response.html_title=\"This Website Has Been Seized\"",
+        "filters": []
+    },
+    {
+        "name": "Legacy: Cobalt Strike Scanner",
+        "query": "services.labels:`open-dir` and services.labels:`c2`",
+        "filters": [],
+        "check": true,
+        "target_filename": "02.08.2022.exe"
+    },
+    {
+        "name": "Legacy: SSHD Kit",
+        "query": "services.http.response.html_tags=\"<title>WEB</title>\"",
+        "filters": [],
+        "check": true,
+        "target_filename": "sshd"
+    },
+    {
+        "name": "Legacy: connectwise",
+        "query": "services.http.response.html_tags=\"<title>\\r\\n\\tScreenConnect Remote Support Software\\r\\n</title>\"",
+        "filters": [],
+        "check": true,
+        "target_filename": "bin/support.client.exe"
+    }
+]

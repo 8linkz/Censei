@@ -67,10 +67,26 @@ func (ds *DirectoryScanner) scanRecursive(baseURL, htmlContent string, currentDe
 		return
 	}
 
+	// Check if already visited or max depth reached first (before size check)
 	if visited[baseURL] || currentDepth >= maxDepth {
 		ds.logger.Debug("Skipping URL: visited=%t, depth=%d >= maxDepth=%d", visited[baseURL], currentDepth, maxDepth)
 		return
 	}
+
+	// Prevent unbounded visited map growth - check BEFORE adding to map
+	// Limit to 5x MaxTotalLinks to account for directories (typically 20-50% of total URLs)
+	// This prevents memory exhaustion on hosts with deep directory structures
+	maxVisited := cfg.MaxTotalLinks * 5
+	if maxVisited <= 0 {
+		maxVisited = 50000 // Default: 50k visited URLs if MaxTotalLinks not set
+	}
+	if len(visited) >= maxVisited {
+		ds.logger.Info("Host reached maximum visited URLs (%d >= %d), stopping recursion to prevent memory exhaustion", len(visited), maxVisited)
+		skipCallback(baseURL)
+		return
+	}
+
+	// Mark as visited after all checks pass
 	visited[baseURL] = true
 
 	ds.logger.Debug("Scanning depth %d: %s", currentDepth, baseURL)
@@ -87,8 +103,10 @@ func (ds *DirectoryScanner) scanRecursive(baseURL, htmlContent string, currentDe
 	}
 
 	// Separate files from directories
-	files := []string{}
-	directories := []string{}
+	// Pre-allocate with estimated capacity based on typical directory structure
+	// Typical ratio: 60-80% files, 20-40% directories
+	files := make([]string, 0, len(links)/2)
+	directories := make([]string, 0, len(links)/4)
 
 	for _, link := range links {
 		if ds.isDirectory(link) {
@@ -136,7 +154,9 @@ func (ds *DirectoryScanner) scanRecursive(baseURL, htmlContent string, currentDe
 
 // extractLinks extracts file links from HTML directory listing content
 func (ds *DirectoryScanner) extractLinks(baseURLStr string, htmlContent string) []string {
-	var links []string
+	// Pre-allocate with reasonable capacity for typical directory listings
+	// Most directories have 10-100 entries
+	links := make([]string, 0, 50)
 
 	// Parse the HTML
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
@@ -240,6 +260,11 @@ func (ds *DirectoryScanner) IsDirectoryListing(htmlContent string) bool {
 
 // isDirectory tries to determine if a URL points to a directory
 func (ds *DirectoryScanner) isDirectory(url string) bool {
+	// Validate input
+	if url == "" {
+		return false
+	}
+
 	// Simple heuristic: URLs ending with / are directories
 	// Also check for common directory patterns
 	if strings.HasSuffix(url, "/") {
@@ -247,7 +272,17 @@ func (ds *DirectoryScanner) isDirectory(url string) bool {
 	}
 
 	// Check for URLs without file extensions (likely directories)
-	lastPart := url[strings.LastIndex(url, "/")+1:]
+	// Safely extract the last part after the last slash
+	index := strings.LastIndex(url, "/")
+	var lastPart string
+	if index == -1 {
+		// No slash found - treat entire URL as last part
+		lastPart = url
+	} else {
+		lastPart = url[index+1:]
+	}
+
+	// If last part has no extension and is not empty, likely a directory
 	if !strings.Contains(lastPart, ".") && lastPart != "" {
 		return true
 	}
