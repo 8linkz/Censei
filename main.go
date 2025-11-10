@@ -39,7 +39,7 @@ func checkCensysCLI(logger *logging.Logger) bool {
 func main() {
 	// Parse command line arguments
 	configPath := flag.String("config", "./config.json", "Path to config file")
-	queriesPath := flag.String("queries", "./queries.json", "Path to queries file")
+	queriesPath := flag.String("queries", "", "Path to queries file (overrides default)")
 	filterStr := flag.String("filter", "", "Custom file extensions to filter (comma-separated, e.g. .pdf,.exe)")
 	queryStr := flag.String("query", "", "Run specific query directly")
 	outputPath := flag.String("output", "", "Override output directory")
@@ -48,21 +48,60 @@ func main() {
 	targetFile := flag.String("target-file", "", "Specific file to check for on hosts")
 	recursiveFlag := flag.Bool("recursive", false, "Enable recursive directory scanning")
 	maxDepthFlag := flag.Int("max-depth", 1, "Maximum depth for recursive scanning")
+	legacyFlag := flag.Bool("legacy", false, "Use legacy CLI-based Censys API instead of Platform API v3")
 	flag.Parse()
 
 	// Initialize logging system
 	logger := logging.NewLogger()
 
-	// Check if censys-cli is installed
-	if !checkCensysCLI(logger) {
-		os.Exit(1)
-	}
-
-	// Load configuration
+	// Load configuration first to get query file paths
 	cfg, err := config.LoadConfig(*configPath)
 	if err != nil {
 		logger.Error("Failed to load configuration: %v", err)
 		os.Exit(1)
+	}
+
+	// Determine which queries file to use
+	var finalQueriesPath string
+	if *queriesPath != "" {
+		// User explicitly specified a queries file
+		finalQueriesPath = *queriesPath
+	} else if *legacyFlag {
+		// Legacy mode: use queries_file_legacy from config or default
+		if cfg.QueriesFileLegacy != "" {
+			finalQueriesPath = cfg.QueriesFileLegacy
+		} else {
+			finalQueriesPath = "./legacy_queries.json"
+		}
+		logger.Info("Legacy mode enabled - using %s", finalQueriesPath)
+	} else {
+		// Default: use queries_file_v3 from config or default
+		if cfg.QueriesFileV3 != "" {
+			finalQueriesPath = cfg.QueriesFileV3
+		} else {
+			finalQueriesPath = "./queriesv3.json"
+		}
+		logger.Info("Platform API v3 mode - using %s", finalQueriesPath)
+	}
+
+	// Check if censys-cli is installed (only required for legacy mode)
+	if *legacyFlag {
+		if !checkCensysCLI(logger) {
+			os.Exit(1)
+		}
+	}
+
+	// Validate mode-specific configuration
+	if *legacyFlag {
+		if err := config.ValidateForLegacy(cfg); err != nil {
+			logger.Error("Legacy mode configuration validation failed: %v", err)
+			os.Exit(1)
+		}
+	} else {
+		if err := config.ValidateForV3(cfg); err != nil {
+			logger.Error("Platform API v3 configuration validation failed: %v", err)
+			os.Exit(1)
+		}
 	}
 
 	// Override config with command line arguments if provided
@@ -80,10 +119,29 @@ func main() {
 	// Initialize the application
 	logger.Info("Censei Scanner starting up...")
 
-	// Load queries configuration
-	queries, err := config.LoadQueries(*queriesPath)
+	// Load queries configuration with helpful error messages
+	queries, err := config.LoadQueries(finalQueriesPath)
 	if err != nil {
-		logger.Error("Failed to load queries: %v", err)
+		logger.Error("Failed to load queries from %s: %v", finalQueriesPath, err)
+
+		// Provide helpful error messages based on the context
+		if *queriesPath != "" {
+			// User specified a custom queries file
+			fmt.Printf("\nERROR: Custom queries file '%s' not found or invalid.\n", *queriesPath)
+			fmt.Println("Please check the file path and ensure it contains valid JSON.")
+		} else if *legacyFlag {
+			// Legacy mode but legacy_queries.json is missing
+			fmt.Println("\nERROR: legacy_queries.json not found.")
+			fmt.Println("Please create this file or use -queries to specify a custom queries file.")
+			fmt.Println("See README for query file examples.")
+		} else {
+			// Platform API mode but queriesv3.json is missing
+			fmt.Println("\nERROR: queriesv3.json not found.")
+			fmt.Println("Please create this file or use -queries to specify a custom queries file.")
+			fmt.Println("For legacy CLI mode, use the -legacy flag with legacy_queries.json.")
+			fmt.Println("See README for query file examples.")
+		}
+
 		os.Exit(1)
 	}
 
@@ -108,11 +166,11 @@ func main() {
 			MaxDepth:       *maxDepthFlag,
 		}
 
-		runQueryConfig(cfg, queryConfig, logger)
+		runQueryConfig(cfg, queryConfig, logger, *legacyFlag)
 	} else {
 		// Start interactive mode
 		selectedQuery, selectedFilters, checkEnabled, targetFileName := cli.ShowMenuWithCheck(
-			queries, *filterStr, *checkFlag, *targetFile)
+			queries, *filterStr, *checkFlag, *targetFile, *legacyFlag)
 		if selectedQuery == "" {
 			logger.Error("No query selected, exiting")
 			os.Exit(0)
@@ -156,7 +214,7 @@ func main() {
 			}
 		}
 
-		runQueryConfig(cfg, queryConfig, logger)
+		runQueryConfig(cfg, queryConfig, logger, *legacyFlag)
 	}
 }
 
@@ -169,7 +227,7 @@ func boolToYesNo(b bool) string {
 }
 
 // runQueryConfig runs a query using a complete Query configuration object
-func runQueryConfig(cfg *config.Config, queryConfig *config.Query, logger *logging.Logger) {
+func runQueryConfig(cfg *config.Config, queryConfig *config.Query, logger *logging.Logger, useLegacy bool) {
 	startTime := time.Now()
 
 	// Initialize statistics
@@ -180,6 +238,7 @@ func runQueryConfig(cfg *config.Config, queryConfig *config.Query, logger *loggi
 		filteredFiles    int
 		checkedFiles     int
 		binaryFilesFound int
+		writeErrors      int
 	}{
 		totalHosts:       0,
 		onlineHosts:      0,
@@ -187,6 +246,7 @@ func runQueryConfig(cfg *config.Config, queryConfig *config.Query, logger *loggi
 		filteredFiles:    0,
 		checkedFiles:     0,
 		binaryFilesFound: 0,
+		writeErrors:      0,
 	}
 
 	// Log query configuration
@@ -196,21 +256,54 @@ func runQueryConfig(cfg *config.Config, queryConfig *config.Query, logger *loggi
 		logger.Info("Max Depth: %d", queryConfig.MaxDepth)
 	}
 
-	// Initialize Censys client
-	censysClient := api.NewCensysClient(cfg.APIKey, cfg.APISecret, logger)
-
-	// Execute Censys query
-	jsonPath, err := censysClient.ExecuteQuery(queryConfig.Query, cfg.OutputDir)
-	if err != nil {
-		logger.Error("Failed to execute Censys query: %v", err)
-		os.Exit(1)
+	// Log API mode
+	if useLegacy {
+		logger.Info("Using Legacy CLI-based API")
+	} else {
+		logger.Info("Using Platform API v3")
 	}
 
-	// Extract hosts from results
-	hosts, err := censysClient.ExtractHostsFromResults(jsonPath)
-	if err != nil {
-		logger.Error("Failed to extract hosts from results: %v", err)
-		os.Exit(1)
+	var hosts []api.Host
+	var err error
+
+	if useLegacy {
+		// Legacy mode: Use CLI-based Censys client
+		censysClient := api.NewCensysClient(cfg.APIKey, cfg.APISecret, cfg, logger)
+
+		// Execute Censys query
+		jsonPath, err := censysClient.ExecuteQuery(queryConfig.Query, cfg.OutputDir)
+		if err != nil {
+			logger.Error("Failed to execute Censys query: %v", err)
+			os.Exit(1)
+		}
+
+		// Extract hosts from results
+		hosts, err = censysClient.ExtractHostsFromResults(jsonPath)
+		if err != nil {
+			logger.Error("Failed to extract hosts from results: %v", err)
+			os.Exit(1)
+		}
+	} else {
+		// Platform API v3 mode
+		censysV3Client, err := api.NewCensysV3Client(cfg.BearerToken, cfg, logger)
+		if err != nil {
+			logger.Error("Failed to initialize Platform API v3 client: %v", err)
+			os.Exit(1)
+		}
+
+		// Execute Censys query
+		jsonPath, err := censysV3Client.ExecuteQuery(queryConfig.Query, cfg.OutputDir)
+		if err != nil {
+			logger.Error("Failed to execute Platform API v3 query: %v", err)
+			os.Exit(1)
+		}
+
+		// Extract hosts from results
+		hosts, err = censysV3Client.ExtractHostsFromResults(jsonPath)
+		if err != nil {
+			logger.Error("Failed to extract hosts from Platform API v3 results: %v", err)
+			os.Exit(1)
+		}
 	}
 
 	logger.Info("Extracted %d hosts from Censys results", len(hosts))
@@ -259,7 +352,7 @@ func runQueryConfig(cfg *config.Config, queryConfig *config.Query, logger *loggi
 	worker.ProcessHosts(hosts)
 
 	// Get updated statistics
-	stats.totalHosts, stats.onlineHosts, stats.totalFiles, stats.filteredFiles, stats.checkedFiles, stats.binaryFilesFound = worker.GetStats()
+	stats.totalHosts, stats.onlineHosts, stats.totalFiles, stats.filteredFiles, stats.checkedFiles, stats.binaryFilesFound, stats.writeErrors = worker.GetStats()
 
 	// Generate and write summary
 	endTime := time.Now()
@@ -281,6 +374,17 @@ func runQueryConfig(cfg *config.Config, queryConfig *config.Query, logger *loggi
 
 	logger.Info("\n%s", summary)
 	writer.WriteRawOutput("\n" + summary)
+
+	// Check for write errors and warn user
+	if stats.writeErrors > 0 {
+		warningMsg := fmt.Sprintf("\n⚠️  WARNING: %d file write errors occurred during execution!", stats.writeErrors)
+		warningMsg += "\n   Some results may not have been saved to output files."
+		warningMsg += "\n   Check the logs above for details about which files failed."
+		warningMsg += "\n   Common causes: disk full, permission errors, or network issues."
+		logger.Error("%s", warningMsg)
+		// Don't fail on write error to raw output here - best effort
+		writer.WriteRawOutput(warningMsg)
+	}
 
 	logger.Info("Query execution complete")
 }

@@ -28,12 +28,12 @@ type Worker struct {
 	maxWorkers       int
 	checkEnabled     bool
 	targetFileName   string
-	foundUrls        *sync.Map // Map for deduplication
-	skippedHosts     *sync.Map
-	blockedHosts     *sync.Map
-	skipCounters     *sync.Map
+	skippedHosts     *sync.Map // Track hosts that hit limits
+	blockedHosts     *sync.Map // In-memory cache of blocked hosts
+	skipCounters     *sync.Map // Skip counters per base host
 	stats            *ScanStats
 	blocklist        *filter.Blocklist
+	processedCount   int64 // Atomic counter for progress tracking
 }
 
 // ScanStats tracks statistics during scanning
@@ -44,6 +44,7 @@ type ScanStats struct {
 	filteredFiles    int
 	checkedFiles     int
 	binaryFilesFound int
+	writeErrors      int // Count of file write errors
 	mu               sync.Mutex
 }
 
@@ -60,7 +61,7 @@ func NewWorker(
 	// Initialize blocklist
 	blocklist := filter.NewBlocklist(config.BlocklistFile, config.EnableBlocklist, logger)
 	if err := blocklist.Load(); err != nil {
-		logger.Error("Failed to load blocklist: %v", err)
+		logger.Error("Failed to load blocklist from %s: %v - continuing with empty blocklist (previously blocked hosts may be rescanned)", config.BlocklistFile, err)
 	}
 
 	return &Worker{
@@ -72,7 +73,6 @@ func NewWorker(
 		queryConfig:      queryConfig,
 		config:           config,
 		maxWorkers:       maxWorkers,
-		foundUrls:        &sync.Map{},
 		skippedHosts:     &sync.Map{},
 		blockedHosts:     &sync.Map{},
 		skipCounters:     &sync.Map{},
@@ -122,33 +122,44 @@ func (w *Worker) ProcessHosts(hosts []api.Host) {
 
 	// Wait for all workers to finish
 	wg.Wait()
-	w.blocklist.Save()
+
+	// Close blocklist (triggers final save and shutdown of save worker)
+	if err := w.blocklist.Close(); err != nil {
+		w.logger.Error("Failed to close blocklist: %v", err)
+	}
+
 	w.logger.Info("Finished processing all hosts")
 }
 
 // processHost handles a single host's crawling and scanning
 func (w *Worker) processHost(host api.Host) {
-	// Log the host we're processing
-	w.logger.Debug("Processing host: %s", host.URL)
+	// Increment processed counter and log progress periodically
+	count := atomic.AddInt64(&w.processedCount, 1)
+	if count%10 == 0 {
+		w.logger.Info("Progress: %d/%d hosts processed", count, w.stats.totalHosts)
+	}
+
+	// Log the host we're processing - INFO level for user visibility
+	w.logger.Info("Processing host: %s", host.URL)
 
 	// Extract base host for blocking checks
 	baseHost := w.extractBaseHost(host.URL)
 
 	// Check if host is in persistent blocklist
 	if w.blocklist.IsBlocked(baseHost) {
-		w.logger.Info("Skipping host - in persistent blocklist: %s", host.URL)
+		w.logger.Debug("Skipping host - in persistent blocklist: %s", host.URL)
 		return
 	}
 
 	// Check if entire base host is blocked
 	if _, isBlocked := w.blockedHosts.Load(baseHost); isBlocked {
-		w.logger.Info("Skipping host - base host is blocked: %s", host.URL)
+		w.logger.Debug("Skipping host - base host is blocked: %s", host.URL)
 		return
 	}
 
 	// Check if this host should be skipped due to limits
 	if _, shouldSkip := w.skippedHosts.Load(host.URL); shouldSkip {
-		w.logger.Info("Skipping host due to previous limit exceeded: %s", host.URL)
+		w.logger.Debug("Skipping host due to previous limit exceeded: %s", host.URL)
 		return
 	}
 
@@ -170,10 +181,16 @@ func (w *Worker) processHost(host api.Host) {
 	w.stats.mu.Unlock()
 
 	// Host is online, write to output
-	w.writer.WriteRawOutput(host.URL)
+	if err := w.writer.WriteRawOutput(host.URL); err != nil {
+		w.logger.Error("Failed to write output for host %s: %v", host.URL, err)
+		w.stats.mu.Lock()
+		w.stats.writeErrors++
+		w.stats.mu.Unlock()
+	}
 
 	// Check if this is a targeted check mode
 	targetedCheckMode := w.checkEnabled && w.fileChecker != nil && w.targetFileName != ""
+	foundTargetFile := false
 
 	// Try to check for a specific file if configured
 	if targetedCheckMode {
@@ -183,23 +200,40 @@ func (w *Worker) processHost(host api.Host) {
 		if err == nil && found {
 			w.logger.Info("Found binary file '%s' at %s with Content-Type: %s",
 				w.targetFileName, host.URL, contentType)
-			binaryOutput := fmt.Sprintf("%s/%s with Content-Type: %s",
-				host.URL, w.targetFileName, contentType)
-			w.writer.WriteRawOutput(fmt.Sprintf("Found binary file: %s", binaryOutput))
-			w.writer.WriteBinaryOutput(binaryOutput)
+			binaryURL := fmt.Sprintf("%s/%s", host.URL, w.targetFileName)
+
+			// Write to raw output
+			if err := w.writer.WriteRawOutput(fmt.Sprintf("Found binary file: %s with Content-Type: %s", binaryURL, contentType)); err != nil {
+				w.logger.Error("Failed to write raw output for binary file %s: %v", binaryURL, err)
+				w.stats.mu.Lock()
+				w.stats.writeErrors++
+				w.stats.mu.Unlock()
+			}
+
+			// Write to binary output
+			binaryLine := fmt.Sprintf("%s with Content-Type: %s", binaryURL, contentType)
+			if err := w.writer.WriteBinaryOutput(binaryLine); err != nil {
+				w.logger.Error("Failed to write binary output for %s: %v", binaryURL, err)
+				w.stats.mu.Lock()
+				w.stats.writeErrors++
+				w.stats.mu.Unlock()
+			}
 
 			// Update check statistics
 			w.stats.mu.Lock()
 			w.stats.checkedFiles++
 			w.stats.binaryFilesFound++
 			w.stats.mu.Unlock()
+
+			// Mark that we found the target file for this host
+			foundTargetFile = true
 		} else if err != nil {
 			w.logger.Debug("Failed to check for specific file: %v", err)
 		}
 	}
 
-	// Process directory content if not in targeted mode or if no file found yet
-	if !targetedCheckMode || w.stats.binaryFilesFound == 0 {
+	// Process directory content if not in targeted mode or if target file was not found
+	if !targetedCheckMode || !foundTargetFile {
 		w.processDirectoryContent(host, htmlContent)
 	}
 }
@@ -226,6 +260,10 @@ func (w *Worker) processDirectoryContent(host api.Host, htmlContent string) {
 		return
 	}
 
+	// Create local deduplication map for this host
+	// This map will be garbage collected after this function returns
+	foundUrls := make(map[string]bool)
+
 	var fileURLs []string
 
 	// Check if recursive scanning is enabled
@@ -235,8 +273,7 @@ func (w *Worker) processDirectoryContent(host api.Host, htmlContent string) {
 	// Create skip callback function with block logic
 	skipCallback := func(hostURL string) {
 		baseHost := w.extractBaseHost(hostURL)
-		w.logger.Info("Marking host for skip due to link limit: %s", hostURL)
-		w.skippedHosts.Store(host.URL, true) // Mark the original host, not subdirectory
+		w.logger.Info("Skipping directory due to link limit: %s", hostURL)
 
 		// Increment skip counter for base host
 		skipCountPtr, _ := w.skipCounters.LoadOrStore(baseHost, new(int64))
@@ -249,6 +286,9 @@ func (w *Worker) processDirectoryContent(host api.Host, htmlContent string) {
 			w.logger.Info("Blocking entire base host after %d skips: %s", newSkipCount, baseHost)
 			w.blockedHosts.Store(baseHost, true)
 			w.blocklist.AddHost(baseHost)
+
+			// Mark the original host URL as skipped (only after blocking threshold is reached)
+			w.skippedHosts.Store(host.URL, true)
 		}
 	}
 
@@ -256,23 +296,29 @@ func (w *Worker) processDirectoryContent(host api.Host, htmlContent string) {
 		w.logger.Info("Starting recursive scan with max-depth %d for %s", maxDepth, host.URL)
 		fileURLs = w.directoryScanner.ScanHostRecursive(host, htmlContent, maxDepth, w.client, w.config, skipCallback)
 	} else {
-		w.logger.Debug("Using normal directory scan for %s", host.URL)
+		w.logger.Info("Scanning directory listing: %s", host.URL)
 		fileURLs = w.directoryScanner.ScanHost(host, htmlContent)
 	}
 
-	// Process each found file
+	// Log found files for user visibility
+	if len(fileURLs) > 0 {
+		w.logger.Info("Found %d files at %s", len(fileURLs), host.URL)
+	}
+
+	// Process each found file with local deduplication map
 	for _, fileURL := range fileURLs {
-		w.processFoundFile(fileURL)
+		w.processFoundFile(fileURL, foundUrls)
 	}
 }
 
 // processFoundFile handles individual file processing including filtering and checking
-func (w *Worker) processFoundFile(fileURL string) {
-	// Check if we've already found this URL
-	if _, exists := w.foundUrls.LoadOrStore(fileURL, true); exists {
+func (w *Worker) processFoundFile(fileURL string, foundUrls map[string]bool) {
+	// Check if we've already found this URL (local deduplication for this host)
+	if foundUrls[fileURL] {
 		w.logger.Debug("Skipping duplicate URL: %s", fileURL)
 		return
 	}
+	foundUrls[fileURL] = true
 
 	// Update stats for file found
 	w.stats.mu.Lock()
@@ -280,7 +326,12 @@ func (w *Worker) processFoundFile(fileURL string) {
 	w.stats.mu.Unlock()
 
 	// Write to raw output
-	w.writer.WriteRawOutput("Found file: " + fileURL)
+	if err := w.writer.WriteRawOutput("Found file: " + fileURL); err != nil {
+		w.logger.Error("Failed to write raw output for file %s: %v", fileURL, err)
+		w.stats.mu.Lock()
+		w.stats.writeErrors++
+		w.stats.mu.Unlock()
+	}
 
 	// Apply filters
 	if w.filter.ShouldFilter(fileURL) {
@@ -292,7 +343,12 @@ func (w *Worker) processFoundFile(fileURL string) {
 		w.stats.mu.Unlock()
 
 		// Write to filtered output
-		w.writer.WriteFilteredOutput(fileURL)
+		if err := w.writer.WriteFilteredOutput(fileURL); err != nil {
+			w.logger.Error("Failed to write filtered output for %s: %v", fileURL, err)
+			w.stats.mu.Lock()
+			w.stats.writeErrors++
+			w.stats.mu.Unlock()
+		}
 
 		// Check file content type if enabled
 		if w.checkEnabled && w.fileChecker != nil && w.fileChecker.ShouldCheck(fileURL) {
@@ -303,31 +359,47 @@ func (w *Worker) processFoundFile(fileURL string) {
 
 // checkFileContent verifies if a file contains binary content
 func (w *Worker) checkFileContent(fileURL string) {
+	// Increment checked files counter (only once per check)
+	w.stats.mu.Lock()
+	w.stats.checkedFiles++
+	w.stats.mu.Unlock()
+
 	found, contentType, err := w.fileChecker.CheckFileURL(fileURL)
 	if err == nil && found {
 		w.logger.Info("Found binary file at %s with Content-Type: %s", fileURL, contentType)
-		w.writer.WriteRawOutput(fmt.Sprintf("Found binary file: %s", fileURL))
-		w.writer.WriteBinaryOutput(fileURL)
 
-		// Update check statistics
+		// Write to raw output
+		if err := w.writer.WriteRawOutput(fmt.Sprintf("Found binary file: %s with Content-Type: %s", fileURL, contentType)); err != nil {
+			w.logger.Error("Failed to write raw output for binary file %s: %v", fileURL, err)
+			w.stats.mu.Lock()
+			w.stats.writeErrors++
+			w.stats.mu.Unlock()
+		}
+
+		// Write to binary output
+		binaryLine := fmt.Sprintf("%s with Content-Type: %s", fileURL, contentType)
+		if err := w.writer.WriteBinaryOutput(binaryLine); err != nil {
+			w.logger.Error("Failed to write binary output for %s: %v", fileURL, err)
+			w.stats.mu.Lock()
+			w.stats.writeErrors++
+			w.stats.mu.Unlock()
+		}
+
+		// Update binary files found statistic
 		w.stats.mu.Lock()
-		w.stats.checkedFiles++
 		w.stats.binaryFilesFound++
 		w.stats.mu.Unlock()
 	} else if err != nil {
 		w.logger.Debug("File check failed for %s: %v", fileURL, err)
 	}
-
-	// Update checked files statistic
-	w.stats.mu.Lock()
-	w.stats.checkedFiles++
-	w.stats.mu.Unlock()
 }
 
 // GetStats returns the current scan statistics
-func (w *Worker) GetStats() (int, int, int, int, int, int) {
+func (w *Worker) GetStats() (int, int, int, int, int, int, int) {
+	w.stats.mu.Lock()
+	defer w.stats.mu.Unlock()
 	return w.stats.totalHosts, w.stats.onlineHosts, w.stats.totalFiles,
-		w.stats.filteredFiles, w.stats.checkedFiles, w.stats.binaryFilesFound
+		w.stats.filteredFiles, w.stats.checkedFiles, w.stats.binaryFilesFound, w.stats.writeErrors
 }
 
 // extractBaseHost extracts the base host (IP only) from a full URL

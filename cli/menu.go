@@ -11,24 +11,92 @@ import (
 )
 
 // ShowMenuWithCheck displays an interactive menu for query selection with file checking options
-func ShowMenuWithCheck(queries []config.Query, customFilterStr string, defaultCheck bool, defaultTargetFile string) (string, []string, bool, string) {
-	// Display banner
-	PrintBanner()
+func ShowMenuWithCheck(queries []config.Query, customFilterStr string, defaultCheck bool, defaultTargetFile string, isLegacyMode bool) (string, []string, bool, string) {
+	// Display banner with mode indication
+	PrintBannerWithMode(isLegacyMode)
 
-	// Display menu options
-	fmt.Println("\nSelect query:")
-	for i, q := range queries {
-		fmt.Printf("%d. %s\n", i+1, q.Name)
-	}
-	fmt.Printf("%d. Custom query\n", len(queries)+1)
-
-	// Read user input
 	reader := bufio.NewReader(os.Stdin)
 
+	// Pagination settings
+	const queriesPerPage = 25
+	currentPage := 0
+	totalPages := (len(queries) + queriesPerPage - 1) / queriesPerPage
+
 	for {
-		fmt.Print("\nEnter selection number: ")
+		// Display current page
+		start := currentPage * queriesPerPage
+		end := start + queriesPerPage
+		if end > len(queries) {
+			end = len(queries)
+		}
+
+		fmt.Println("\n═══════════════════════════════════════════════════════════════")
+		if totalPages > 1 {
+			fmt.Printf("Available Queries (Page %d/%d):\n", currentPage+1, totalPages)
+		} else {
+			fmt.Println("Available Queries:")
+		}
+		fmt.Println("═══════════════════════════════════════════════════════════════")
+
+		// Display queries for current page
+		for i := start; i < end; i++ {
+			q := queries[i]
+			// Build query info on one line
+			line := fmt.Sprintf("[%d] %s", i+1, q.Name)
+
+			// Add filters
+			if len(q.Filters) > 0 {
+				line += fmt.Sprintf(" - Filters: %s", strings.Join(q.Filters, ", "))
+			}
+
+			// Add recursive info
+			if q.Recursive == "yes" {
+				line += fmt.Sprintf(" | Recursive (depth: %d)", q.MaxDepth)
+			}
+
+			// Add target file info
+			if q.Check && q.TargetFileName != "" {
+				line += fmt.Sprintf(" | Target: %s", q.TargetFileName)
+			}
+
+			fmt.Println(line)
+		}
+
+		fmt.Println("\n───────────────────────────────────────────────────────────────")
+
+		// Show navigation options
+		if totalPages > 1 {
+			fmt.Printf("\n[c] Custom query")
+			if currentPage < totalPages-1 {
+				fmt.Printf("  |  [n] Next page")
+			}
+			if currentPage > 0 {
+				fmt.Printf("  |  [p] Previous page")
+			}
+			fmt.Println()
+		} else {
+			fmt.Println("\n[c] Custom query")
+		}
+
+		fmt.Println("\n═══════════════════════════════════════════════════════════════")
+		fmt.Print("Enter selection: ")
+
 		input, _ := reader.ReadString('\n')
-		input = strings.TrimSpace(input)
+		input = strings.TrimSpace(strings.ToLower(input))
+
+		// Handle navigation commands
+		if input == "n" && currentPage < totalPages-1 {
+			currentPage++
+			continue
+		}
+		if input == "p" && currentPage > 0 {
+			currentPage--
+			continue
+		}
+		if input == "c" {
+			// Handle custom query (existing code below)
+			input = strconv.Itoa(len(queries) + 1)
+		}
 
 		// Convert to number
 		num, err := strconv.Atoi(input)
@@ -108,8 +176,8 @@ func ShowMenuWithCheck(queries []config.Query, customFilterStr string, defaultCh
 
 // ShowMenu provides backward compatibility with the original interface
 func ShowMenu(queries []config.Query, customFilterStr string) (string, []string) {
-	// Call the new function but only return the first two values
-	query, filters, _, _ := ShowMenuWithCheck(queries, customFilterStr, false, "")
+	// Call the new function but only return the first two values (default to Platform API v3 mode)
+	query, filters, _, _ := ShowMenuWithCheck(queries, customFilterStr, false, "", false)
 	return query, filters
 }
 

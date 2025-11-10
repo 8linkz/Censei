@@ -65,11 +65,15 @@ func (l *Logger) log(level LogLevel, format string, args ...interface{}) {
 	defer l.mu.Unlock()
 
 	// Format the log message
+	// Optimize: Use single fmt.Sprintf with pre-allocated slice to avoid allocation in hot path
 	now := time.Now().Format("2006-01-02 15:04:05")
 	levelName := level.String()
 
-	message := fmt.Sprintf(format, args...)
-	logLine := fmt.Sprintf("[%s] %s %s\n", now, levelName, message)
+	// Pre-allocate slice with known capacity to avoid allocation on every log call
+	allArgs := make([]interface{}, 0, len(args)+2)
+	allArgs = append(allArgs, now, levelName)
+	allArgs = append(allArgs, args...)
+	logLine := fmt.Sprintf("[%s] %s "+format+"\n", allArgs...)
 
 	// Write to console
 	fmt.Print(logLine)

@@ -7,49 +7,60 @@ import (
 	"censei/logging"
 )
 
-// Filter handles file filtering based on extensions
+// Filter handles file filtering based on extensions with O(1) map lookup
 type Filter struct {
-	extensions []string
-	logger     *logging.Logger
+	extensionMap map[string]bool
+	logger       *logging.Logger
 }
 
 // NewFilter creates a new filter with the given extensions
+// Extensions are normalized once during initialization for optimal performance
 func NewFilter(extensions []string, logger *logging.Logger) *Filter {
-	// Ensure all extensions start with a dot
-	for i, ext := range extensions {
+	// Create map for O(1) lookup instead of O(n) slice iteration
+	extensionMap := make(map[string]bool, len(extensions))
+
+	for _, ext := range extensions {
+		// Ensure extension starts with a dot
 		if !strings.HasPrefix(ext, ".") {
-			extensions[i] = "." + ext
+			ext = "." + ext
 		}
+		// Store as lowercase for case-insensitive matching
+		// Normalization happens once here instead of on every file check
+		extensionMap[strings.ToLower(ext)] = true
 	}
 
 	return &Filter{
-		extensions: extensions,
-		logger:     logger,
+		extensionMap: extensionMap,
+		logger:       logger,
 	}
 }
 
 // ShouldFilter checks if a file should be filtered based on its extension
+// Uses O(1) map lookup for optimal performance
 func (f *Filter) ShouldFilter(fileURL string) bool {
 	// No filters defined
-	if len(f.extensions) == 0 {
+	if len(f.extensionMap) == 0 {
 		return false
 	}
 
-	// Get the file extension
+	// Get the file extension and convert to lowercase once
 	ext := strings.ToLower(filepath.Ext(fileURL))
 
-	// Check if the extension is in our filter list
-	for _, filterExt := range f.extensions {
-		if strings.ToLower(filterExt) == ext {
-			f.logger.Debug("File %s matches filter %s", fileURL, filterExt)
-			return true
-		}
+	// O(1) map lookup instead of O(n) loop
+	if f.extensionMap[ext] {
+		f.logger.Debug("File %s matches filter extension %s", fileURL, ext)
+		return true
 	}
 
 	return false
 }
 
-// GetFilterExtensions returns the current filter extensions
+// GetFilterExtensions returns the current filter extensions as a slice
 func (f *Filter) GetFilterExtensions() []string {
-	return f.extensions
+	// Convert map keys back to slice for compatibility
+	extensions := make([]string, 0, len(f.extensionMap))
+	for ext := range f.extensionMap {
+		extensions = append(extensions, ext)
+	}
+	return extensions
 }

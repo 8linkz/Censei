@@ -2,7 +2,10 @@ module censei
 
 go 1.24.2
 
-require github.com/PuerkitoBio/goquery v1.10.3
+require (
+	github.com/PuerkitoBio/goquery v1.10.3
+	github.com/censys/censys-sdk-go v0.22.3
+)
 
 require (
 	github.com/andybalholm/cascadia v1.3.3 // indirect

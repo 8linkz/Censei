@@ -5,12 +5,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Config holds application configuration
 type Config struct {
-	APIKey                string `json:"api_key"`
-	APISecret             string `json:"api_secret"`
+	// Legacy API credentials (for censys-cli tool)
+	APIKey    string `json:"api_key"`
+	APISecret string `json:"api_secret"`
+
+	// Platform API v3 credentials
+	BearerToken    string `json:"bearer_token"`
+	OrganizationID string `json:"organization_id"`
+
+	// General settings
 	OutputDir             string `json:"output_dir"`
 	HTTPTimeoutSeconds    int    `json:"http_timeout_seconds"`
 	MaxConcurrentRequests int    `json:"max_concurrent_requests"`
@@ -21,8 +29,22 @@ type Config struct {
 	MaxLinksPerDirectory  int    `json:"max_links_per_directory"`
 	MaxTotalLinks         int    `json:"max_total_links"`
 	MaxSkipsBeforeBlock   int    `json:"max_skips_before_block"`
-	EnableBlocklist       bool   `json:"enable_blocklist"`
 	BlocklistFile         string `json:"blocklist_file"`
+	EnableBlocklist       bool   `json:"enable_blocklist"`
+
+	// Legacy CLI parameters (for censys-cli tool)
+	LegacyPages        int    `json:"legacy_pages"`
+	LegacyPerPage      int    `json:"legacy_per_page"`
+	LegacyIndexType    string `json:"legacy_index_type"`
+	LegacySortOrder    string `json:"legacy_sort_order"`
+	LegacyVirtualHosts string `json:"legacy_virtual_hosts"`
+
+	// Platform API v3 parameters
+	V3MaxResults int `json:"v3_max_results"`
+
+	// Query file paths
+	QueriesFileV3     string `json:"queries_file_v3"`
+	QueriesFileLegacy string `json:"queries_file_legacy"`
 }
 
 // Query represents a predefined Censys query with its filters
@@ -38,17 +60,6 @@ type Query struct {
 
 // LoadConfig loads and validates the application configuration from a file
 func LoadConfig(path string) (*Config, error) {
-	// Set default values
-	config := &Config{
-		OutputDir:             "./output",
-		HTTPTimeoutSeconds:    5,
-		MaxConcurrentRequests: 10,
-		LogLevel:              "INFO",
-		LogFile:               "./censei.log",
-		EnableBlocklist:       true,
-		BlocklistFile:         "./blocked_hosts.txt",
-	}
-
 	// Read config file
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -56,17 +67,59 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	// Parse JSON
-	err = json.Unmarshal(data, config)
+	var config Config
+	err = json.Unmarshal(data, &config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
-	// Validate config
-	if err := validateConfig(config); err != nil {
+	// Validate common config (no mode-specific validation yet)
+	if err := validateConfig(&config); err != nil {
 		return nil, err
 	}
 
-	return config, nil
+	// Log successful config load (before logger is initialized)
+	fmt.Printf("[INFO] Configuration loaded successfully from %s\n", path)
+
+	return &config, nil
+}
+
+// ValidateForLegacy validates config fields required for legacy mode
+func ValidateForLegacy(cfg *Config) error {
+	if cfg.APIKey == "" {
+		return fmt.Errorf("api_key is required for legacy mode")
+	}
+	if cfg.APISecret == "" {
+		return fmt.Errorf("api_secret is required for legacy mode")
+	}
+	if cfg.LegacyPages <= 0 {
+		return fmt.Errorf("legacy_pages must be greater than 0")
+	}
+	if cfg.LegacyPerPage <= 0 {
+		return fmt.Errorf("legacy_per_page must be greater than 0")
+	}
+	if cfg.LegacyIndexType == "" {
+		return fmt.Errorf("legacy_index_type cannot be empty")
+	}
+	if cfg.LegacySortOrder == "" {
+		return fmt.Errorf("legacy_sort_order cannot be empty")
+	}
+	if cfg.LegacyVirtualHosts == "" {
+		return fmt.Errorf("legacy_virtual_hosts cannot be empty")
+	}
+	return nil
+}
+
+// ValidateForV3 validates config fields required for Platform API v3 mode
+func ValidateForV3(cfg *Config) error {
+	if cfg.BearerToken == "" {
+		return fmt.Errorf("bearer_token is required for Platform API v3 mode")
+	}
+	if cfg.V3MaxResults <= 0 {
+		return fmt.Errorf("v3_max_results must be greater than 0")
+	}
+	// OrganizationID is optional, no validation needed
+	return nil
 }
 
 // LoadQueries loads predefined queries from a file
@@ -82,25 +135,39 @@ func LoadQueries(path string) ([]Query, error) {
 		return nil, fmt.Errorf("failed to parse queries file: %w", err)
 	}
 
+	// Log successful queries load (before logger is initialized)
+	fmt.Printf("[INFO] Loaded %d queries from %s\n", len(queries), path)
+
 	return queries, nil
 }
 
 // validateConfig ensures that required fields are present
 func validateConfig(cfg *Config) error {
-	if cfg.APIKey == "" {
-		return fmt.Errorf("api_key is required")
-	}
-	if cfg.APISecret == "" {
-		return fmt.Errorf("api_secret is required")
-	}
+	// Common validation (required for both modes)
 	if cfg.HTTPTimeoutSeconds <= 0 {
-		cfg.HTTPTimeoutSeconds = 5 // Default to 5 seconds
+		return fmt.Errorf("http_timeout_seconds must be greater than 0")
 	}
 	if cfg.MaxConcurrentRequests <= 0 {
-		cfg.MaxConcurrentRequests = 10 // Default to 10 concurrent requests
+		return fmt.Errorf("max_concurrent_requests must be greater than 0")
 	}
 
-	// Create output directory if it doesn't exist
+	// Validate output directory path to prevent path traversal
+	if cfg.OutputDir == "" {
+		return fmt.Errorf("output_dir path in config cannot be empty")
+	}
+
+	// Clean and validate the path
+	cleanPath := filepath.Clean(cfg.OutputDir)
+
+	// Check for path traversal sequences after cleaning
+	if strings.Contains(cleanPath, "..") {
+		return fmt.Errorf("output_dir contains invalid path traversal sequence")
+	}
+
+	// Update to cleaned path
+	cfg.OutputDir = cleanPath
+
+	// Create output directory if it doesn't exist (directory can be empty, that's fine)
 	if _, err := os.Stat(cfg.OutputDir); os.IsNotExist(err) {
 		err := os.MkdirAll(cfg.OutputDir, 0755)
 		if err != nil {
@@ -108,9 +175,9 @@ func validateConfig(cfg *Config) error {
 		}
 	}
 
-	// Set default binary output file if not specified
+	// Validate binary output file path is set
 	if cfg.BinaryOutputFile == "" {
-		cfg.BinaryOutputFile = filepath.Join(cfg.OutputDir, "binary_found.txt")
+		return fmt.Errorf("binary_output_file cannot be empty")
 	}
 
 	return nil

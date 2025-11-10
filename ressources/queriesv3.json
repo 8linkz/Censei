@@ -1,0 +1,88 @@
+[
+    {
+        "name": "Russia OpenDir",
+        "query": "host.services.labels.value=\"OPEN_DIRECTORY\" and host.location.country_code=\"RU\"",
+        "recursive": "yes",
+        "max-depth": 2,
+        "check": true,
+        "filters": [
+            ".pdf",
+            ".lnk",
+            ".ps1",
+            ".bat",
+            ".scr",
+            ".exe"
+        ]
+    },
+    {
+        "name": "US OpenDir",
+        "query": "host.services.labels.value=\"OPEN_DIRECTORY\" and host.location.country_code=\"US\"",
+        "recursive": "yes",
+        "max-depth": 2,
+        "check": true,
+        "filters": [
+            ".exe",
+            ".zip",
+            ".ps1",
+            ".bat",
+            ".scr",
+            ".lnk"
+        ]
+    },
+    {
+        "name": "Germany OpenDir",
+        "query": "host.services.labels.value=\"OPEN_DIRECTORY\" and host.location.country_code=\"DE\"",
+        "recursive": "yes",
+        "max-depth": 2,
+        "check": true,
+        "filters": [
+            ".pdf",
+            ".exe",
+            ".ps1",
+            ".bat",
+            ".scr",
+            ".lnk"
+        ]
+    },
+    {
+        "name": "WsgiDAV",
+        "query": "host.services.endpoints.http.html_tags=\"<title>WsgiDAV - Index of / </title>\"",
+        "recursive": "yes",
+        "max-depth": 2,
+        "check": true,
+        "filters": [
+            ".pdf",
+            ".exe",
+            ".lnk",
+            ".ps1",
+            ".scr",
+            ".bat"
+        ]
+    },
+    {
+        "name": "MooBot",
+        "query": "host.services.software.vendor=\"MooBot\" or host.services.hardware.vendor=\"MooBot\" or host.services.operating_systems.vendor=\"MooBot\" or web.software.vendor=\"MooBot\" or web.hardware.vendor=\"MooBot\" or web.operating_systems.vendor=\"MooBot\" or host.services.endpoints.http.html_title=\"This Website Has Been Seized\" or web.endpoints.http.html_title=\"This Website Has Been Seized\"",
+        "filters": []
+    },
+    {
+        "name": "Cobalt Strike Scanner",
+        "query": "(host.services.labels.value=\"OPEN_DIRECTORY\" and host.services.threats.type=\"C2_SERVER\") or (web.labels.value=\"OPEN_DIRECTORY\" and web.threats.type=\"C2_SERVER\")",
+        "filters": [],
+        "check": true,
+        "target_filename": "02.08.2022.exe"
+    },
+    {
+        "name": "SSHD Kit v3",
+        "query": "host.services.endpoints.http.html_tags=\"<title>WEB</title>\" or web.endpoints.http.html_tags=\"<title>WEB</title>\"",
+        "filters": [],
+        "check": true,
+        "target_filename": "sshd"
+    },
+    {
+        "name": "connectwise",
+        "query": "host.services.endpoints.http.html_tags=\"<title>tScreenConnect Remote Support Software</title>\"",
+        "filters": [],
+        "check": true,
+        "target_filename": "bin/support.client.exe"
+    }
+]

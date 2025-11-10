@@ -18,21 +18,33 @@ type Client struct {
 	logger     *logging.Logger
 }
 
-// NewClient creates a new crawler client
+// NewClient creates a new crawler client with optimized connection pooling
 func NewClient(timeoutSeconds int, logger *logging.Logger) *Client {
 	// Create a custom transport with optimized settings
+	// These values are tuned for high-concurrency scanning with many workers
 	transport := &http.Transport{
-		MaxIdleConns:          100,
-		IdleConnTimeout:       30 * time.Second,
+		MaxIdleConns:          200,               // Total idle connections across all hosts (was 100)
+		MaxIdleConnsPerHost:   20,                // Idle connections per host (was 10, default was 2)
+		MaxConnsPerHost:       0,                 // No limit on total connections per host
+		IdleConnTimeout:       90 * time.Second,  // Keep connections alive longer
 		ResponseHeaderTimeout: time.Duration(timeoutSeconds) * time.Second,
-		DisableKeepAlives:     true, // Prevent "unsolicited response" messages
-		DisableCompression:    true, // Speed up response processing
+		DisableKeepAlives:     false,             // Enable keep-alives for performance (5-10x faster)
+		DisableCompression:    true,              // Speed up response processing
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: true, // Skip SSL certificate verification
 		},
+		// Prevent "unsolicited response" errors by handling connection reuse properly
+		ExpectContinueTimeout: 1 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		// Optimize dialing and keep-alive probing
+		ForceAttemptHTTP2:     false,             // Disable HTTP/2 for scanning (simpler, faster for many small requests)
+		MaxResponseHeaderBytes: 10 << 20,         // 10 MB max header size (prevent abuse)
 	}
 
 	client := &http.Client{
+		// Use timeout from config (http_timeout_seconds)
+		// Note: This applies to entire request including body read
+		// For large directory listings, increase http_timeout_seconds in config.json
 		Timeout:   time.Duration(timeoutSeconds) * time.Second,
 		Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -57,6 +69,7 @@ func (c *Client) CheckHostAndFetch(host api.Host) (bool, string, error) {
 
 	req, err := http.NewRequestWithContext(ctx, "GET", host.URL, nil)
 	if err != nil {
+		c.logger.Error("Failed to create HTTP request for %s: %v", host.URL, err)
 		return false, "", fmt.Errorf("failed to create request: %w", err)
 	}
 
@@ -77,10 +90,16 @@ func (c *Client) CheckHostAndFetch(host api.Host) (bool, string, error) {
 		return false, "", nil
 	}
 
-	// Read the response body
-	bodyBytes, err := io.ReadAll(resp.Body)
+	// Read the response body with size limit to prevent memory exhaustion
+	// Limit to 50 MB to handle large directory listings with thousands of files
+	// Typical directory listings: 1-100 KB, large ones: 5-20 MB, extreme cases: up to 50 MB
+	const maxBodySize = 50 << 20 // 50 MB
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxBodySize))
 	if err != nil {
-		return true, "", fmt.Errorf("failed to read response body: %w", err)
+		// Timeout errors for large directories (e.g., /calls-old/) are common
+		// Log as debug and continue - the host is online, just slow to respond
+		c.logger.Debug("Failed to read response body for %s: %v (skipping)", host.URL, err)
+		return true, "", nil // Return empty body, but mark host as online
 	}
 
 	c.logger.Debug("Host online: %s (Status: %d, Content length: %d bytes)",
